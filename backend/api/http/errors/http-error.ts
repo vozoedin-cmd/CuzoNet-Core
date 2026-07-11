@@ -21,8 +21,10 @@ export interface HttpError {
 }
 
 const applicationErrorStatusCodes: Readonly<Record<string, number>> = {
+  CLIENT_CANNOT_RECEIVE_SERVICE: 409,
   CLIENT_DOCUMENT_CONFLICT: 409,
   INVALID_CLIENT_DATA: 422,
+  INVALID_SERVICE_DATA: 422,
   RESOURCE_NOT_FOUND: 404,
   VALIDATION_ERROR: 422,
 };

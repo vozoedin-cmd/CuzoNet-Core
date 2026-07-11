@@ -3,20 +3,27 @@ import { createServer } from 'node:http';
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { createClientsRouter } from './api/clients/routes/clients.routes.js';
 import { createApp } from './api/http/app.js';
+import { ServicesController } from './api/services/controller/services.controller.js';
+import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
 import { CreateClient } from './application/use-cases/clients/create-client/create-client.use-case.js';
 import { GetClient } from './application/use-cases/clients/get-client/get-client.use-case.js';
 import { ListClients } from './application/use-cases/clients/list-clients/list-clients.use-case.js';
 import { UpdateClient } from './application/use-cases/clients/update-client/update-client.use-case.js';
+import { CreateService } from './application/use-cases/services/create-service/create-service.use-case.js';
+import { GetService } from './application/use-cases/services/get-service/get-service.use-case.js';
+import { ListClientServices } from './application/use-cases/services/list-client-services/list-client-services.use-case.js';
 import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
 import { environment } from './infrastructure/config/environment.js';
 import { InMemoryClientRepository } from './infrastructure/database/clients/in-memory/in-memory-client-repository.js';
+import { InMemoryServiceRepository } from './infrastructure/database/services/in-memory/in-memory-service-repository.js';
 import { UuidV7IdGenerator } from './infrastructure/identity/uuid-v7-id-generator.js';
 import { logger } from './infrastructure/logging/logger.js';
 
 const shutdownTimeoutMs = 10_000;
 const clientRepository = new InMemoryClientRepository();
+const serviceRepository = new InMemoryServiceRepository();
 const idGenerator = new UuidV7IdGenerator();
 const temporaryCompanyId = idGenerator.generate();
 const companyContext: CompanyContext = {
@@ -33,7 +40,19 @@ const clientsController = new ClientsController({
   updateClient: new UpdateClient(clientRepository, companyContext, clock),
 });
 const clientsRouter = createClientsRouter(clientsController);
-const server = createServer(createApp({ clientsRouter }));
+const servicesController = new ServicesController({
+  createService: new CreateService(
+    serviceRepository,
+    clientRepository,
+    companyContext,
+    idGenerator,
+    clock,
+  ),
+  getService: new GetService(serviceRepository, companyContext),
+  listClientServices: new ListClientServices(serviceRepository, companyContext),
+});
+const servicesRouter = createServicesRouter(servicesController);
+const server = createServer(createApp({ clientsRouter, servicesRouter }));
 
 let isShuttingDown = false;
 
