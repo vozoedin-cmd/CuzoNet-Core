@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "files": []
+  "include": ["backend/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
 }

@@ -1,0 +1,40 @@
+import 'dotenv/config';
+
+import { z } from 'zod';
+
+const timeZoneSchema = z.string().min(1).superRefine((timeZone, context) => {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone });
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'Debe ser una zona horaria IANA válida.',
+    });
+  }
+});
+
+const environmentSchema = z.object({
+  APP_NAME: z.string().trim().min(1),
+  NODE_ENV: z.enum(['development', 'test', 'production']),
+  PORT: z.coerce.number().int().min(1).max(65535),
+  TIMEZONE: timeZoneSchema,
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']),
+});
+
+const parsedEnvironment = environmentSchema.safeParse({
+  APP_NAME: process.env.APP_NAME,
+  NODE_ENV: process.env.NODE_ENV,
+  PORT: process.env.PORT,
+  TIMEZONE: process.env.TIMEZONE,
+  LOG_LEVEL: process.env.LOG_LEVEL,
+});
+
+if (!parsedEnvironment.success) {
+  const details = parsedEnvironment.error.issues
+    .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+    .join('; ');
+
+  throw new Error(`Configuración de entorno inválida: ${details}`);
+}
+
+export const environment = Object.freeze(parsedEnvironment.data);
