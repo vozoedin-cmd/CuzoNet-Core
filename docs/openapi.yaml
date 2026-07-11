@@ -1,0 +1,1035 @@
+openapi: 3.1.0
+info:
+  title: CuzoNet API
+  version: 1.0.0-draft
+  description: |
+    Contrato HTTP para el ERP WISP CuzoNet. El Backend es la fuente única de verdad.
+    Las rutas de n8n son exclusivamente para flujos nuevos; los flujos existentes no se modifican.
+    Las mutaciones admiten reintentos seguros mediante el encabezado Idempotency-Key.
+servers:
+  - url: https://api.cuzonet.example/api/v1
+    description: Producción
+  - url: http://localhost:3000/api/v1
+    description: Desarrollo local
+tags:
+  - name: Health
+  - name: Auth
+  - name: Clientes
+  - name: Planes
+  - name: Pagos
+  - name: Provisioning
+  - name: Analytics
+  - name: Integraciones
+  - name: IA
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Comprueba la salud pública del servicio
+      operationId: getHealth
+      responses:
+        '200':
+          description: Servicio disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Inicia sesión de un usuario humano
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sesión autenticada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /clientes:
+    get:
+      tags: [Clientes]
+      summary: Lista clientes paginados
+      operationId: listClients
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ClientStatus' }
+      responses:
+        '200':
+          description: Página de clientes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Clientes]
+      summary: Registra un cliente
+      operationId: createClient
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientCreateRequest'
+      responses:
+        '201':
+          description: Cliente creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /clientes/{clientId}:
+    parameters:
+      - $ref: '#/components/parameters/ClientId'
+    get:
+      tags: [Clientes]
+      summary: Obtiene un cliente y sus datos principales
+      operationId: getClient
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cliente encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Clientes]
+      summary: Actualiza datos administrativos del cliente
+      operationId: updateClient
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientUpdateRequest'
+      responses:
+        '200':
+          description: Cliente actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Clientes]
+      summary: Archiva un cliente sin borrar su historial
+      operationId: archiveClient
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Cliente archivado
+        '409':
+          description: No puede archivarse mientras existan servicios u operaciones incompatibles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /clientes/{clientId}/servicios:
+    parameters:
+      - $ref: '#/components/parameters/ClientId'
+    get:
+      tags: [Clientes]
+      summary: Lista los servicios de un cliente
+      operationId: listClientServices
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Servicios del cliente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Service'
+    post:
+      tags: [Clientes, Provisioning]
+      summary: Crea un servicio y solicita su alta técnica
+      operationId: createClientService
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCreateRequest'
+      responses:
+        '202':
+          description: Servicio creado y operación de Provisioning encolada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /planes:
+    get:
+      tags: [Planes]
+      summary: Lista planes vigentes
+      operationId: listPlans
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Planes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Plan'
+    post:
+      tags: [Planes]
+      summary: Crea un plan y su primera versión
+      operationId: createPlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCreateRequest'
+      responses:
+        '201':
+          description: Plan creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /planes/{planId}:
+    parameters:
+      - $ref: '#/components/parameters/PlanId'
+    put:
+      tags: [Planes]
+      summary: Crea una nueva versión comercial del plan
+      operationId: revisePlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRevisionRequest'
+      responses:
+        '200':
+          description: Nueva versión del plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /pagos:
+    get:
+      tags: [Pagos]
+      summary: Lista pagos con filtros y paginación
+      operationId: listPayments
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: clientId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Página de pagos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentPage'
+    post:
+      tags: [Pagos]
+      summary: Registra un pago y sus asignaciones
+      operationId: recordPayment
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreateRequest'
+      responses:
+        '201':
+          description: Pago registrado; los efectos posteriores se procesan por eventos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /clientes/{clientId}/cuenta:
+    get:
+      tags: [Pagos]
+      summary: Consulta saldo, deuda, mora y próximo vencimiento
+      operationId: getClientAccountSummary
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Resumen de cuenta del cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /mikrotik/simplequeue:
+    post:
+      tags: [Provisioning]
+      summary: Solicita crear o reconciliar la Simple Queue de un servicio
+      operationId: requestSimpleQueue
+      description: No crea la Queue directamente desde HTTP. Encola una operación idempotente de Provisioning.
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimpleQueueRequest'
+      responses:
+        '202':
+          description: Operación encolada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /mikrotik/suspender:
+    post:
+      tags: [Provisioning]
+      summary: Solicita suspensión técnica de un servicio
+      operationId: requestServiceSuspension
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceStateRequest'
+      responses:
+        '202':
+          description: Operación de suspensión encolada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+
+  /mikrotik/reactivar:
+    post:
+      tags: [Provisioning]
+      summary: Solicita reactivación técnica de un servicio
+      operationId: requestServiceReactivation
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceStateRequest'
+      responses:
+        '202':
+          description: Operación de reactivación encolada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+
+  /operaciones/{operationId}:
+    get:
+      tags: [Provisioning]
+      summary: Consulta el resultado de una operación asíncrona
+      operationId: getOperation
+      security:
+        - BearerAuth: []
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: Estado de la operación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /dashboard:
+    get:
+      tags: [Analytics]
+      summary: Devuelve indicadores operativos y comerciales del dashboard
+      operationId: getDashboard
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Métricas de dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+
+  /reportes/clientes:
+    get:
+      tags: [Analytics]
+      summary: Reporta clientes por estado de servicio
+      operationId: getClientReport
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [active, suspended, overdue]
+      responses:
+        '200':
+          description: Resultado del reporte
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResult'
+
+  /reportes/ingresos:
+    get:
+      tags: [Analytics]
+      summary: Reporta ingresos diarios o mensuales
+      operationId: getRevenueReport
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: granularity
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [daily, monthly]
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Resultado del reporte
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResult'
+
+  /integraciones/n8n/eventos:
+    get:
+      tags: [Integraciones]
+      summary: Obtiene eventos pendientes para una integración n8n autorizada
+      operationId: pullN8nEvents
+      description: Diseñado para flujos nuevos que consultan por HTTP; no modifica los flujos existentes.
+      security:
+        - IntegrationApiKey: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Eventos pendientes para el consumidor autenticado
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DomainEvent'
+
+  /integraciones/n8n/eventos/{eventId}/confirmaciones:
+    post:
+      tags: [Integraciones]
+      summary: Confirma el procesamiento de un evento por n8n
+      operationId: acknowledgeN8nEvent
+      security:
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventAcknowledgement'
+      responses:
+        '204':
+          description: Confirmación registrada
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ia/mensajes:
+    post:
+      tags: [IA]
+      summary: Procesa una solicitud de IA con herramientas restringidas
+      operationId: processAiMessage
+      description: Disponible en fase de integración. Las acciones sensibles requieren identidad y confirmación según política.
+      security:
+        - IntegrationApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiMessageRequest'
+      responses:
+        '200':
+          description: Respuesta o solicitud de confirmación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiMessageResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    IntegrationApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    ClientId:
+      name: clientId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PlanId:
+      name: planId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+      description: Clave única por intención de mutación; los reintentos devuelven el resultado original.
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+      description: Identificador de trazabilidad. Si falta, el Backend genera uno.
+  responses:
+    Unauthorized:
+      description: Credenciales ausentes o inválidas
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: Conflicto con el estado actual o duplicidad
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ValidationError:
+      description: Solicitud semánticamente inválida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationProblem' }
+    ServiceUnavailable:
+      description: Dependencia no disponible o servicio degradado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status, timestamp]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        timestamp: { type: string, format: date-time }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, writeOnly: true }
+    AuthSession:
+      type: object
+      required: [accessToken, expiresAt, user]
+      properties:
+        accessToken: { type: string, writeOnly: true }
+        expiresAt: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/UserSummary' }
+    UserSummary:
+      type: object
+      required: [id, email, displayName, permissions]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+    ClientStatus:
+      type: string
+      enum: [active, archived]
+    ClientContactInput:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [phone, email, whatsapp] }
+        value: { type: string, maxLength: 180 }
+        isPrimary: { type: boolean, default: false }
+    ClientAddressInput:
+      type: object
+      additionalProperties: false
+      required: [addressLine]
+      properties:
+        label: { type: string, maxLength: 80 }
+        addressLine: { type: string, maxLength: 300 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        isServiceAddress: { type: boolean, default: false }
+    ClientCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [clientType, legalName, documentType, documentNumber]
+      properties:
+        clientType: { type: string, enum: [person, company] }
+        legalName: { type: string, minLength: 2, maxLength: 180 }
+        documentType: { type: string, maxLength: 32 }
+        documentNumber: { type: string, minLength: 3, maxLength: 64 }
+        contacts:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ClientContactInput' }
+        addresses:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ClientAddressInput' }
+        note: { type: string, maxLength: 2000 }
+    ClientUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        legalName: { type: string, minLength: 2, maxLength: 180 }
+        contacts:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ClientContactInput' }
+        addresses:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ClientAddressInput' }
+    Client:
+      type: object
+      required: [id, clientType, legalName, documentType, documentNumber, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        clientType: { type: string, enum: [person, company] }
+        legalName: { type: string }
+        documentType: { type: string }
+        documentNumber: { type: string }
+        status: { $ref: '#/components/schemas/ClientStatus' }
+        contacts:
+          type: array
+          items: { $ref: '#/components/schemas/ClientContactInput' }
+        addresses:
+          type: array
+          items: { $ref: '#/components/schemas/ClientAddressInput' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ClientPage:
+      type: object
+      required: [data, page, pageSize, total]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Client' }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    PlanCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, serviceType, priceCents, downloadKbps, uploadKbps]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9_-]{2,32}$' }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        serviceType: { type: string, enum: [simple_queue, pppoe, hotspot] }
+        priceCents: { type: integer, minimum: 0 }
+        downloadKbps: { type: integer, minimum: 1 }
+        uploadKbps: { type: integer, minimum: 1 }
+    PlanRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [priceCents, downloadKbps, uploadKbps, effectiveFrom]
+      properties:
+        priceCents: { type: integer, minimum: 0 }
+        downloadKbps: { type: integer, minimum: 1 }
+        uploadKbps: { type: integer, minimum: 1 }
+        effectiveFrom: { type: string, format: date }
+        isActive: { type: boolean }
+    Plan:
+      type: object
+      required: [id, code, name, serviceType, currentVersion]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        serviceType: { type: string }
+        isActive: { type: boolean }
+        currentVersion:
+          type: object
+          required: [id, version, priceCents, downloadKbps, uploadKbps]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer }
+            priceCents: { type: integer }
+            downloadKbps: { type: integer }
+            uploadKbps: { type: integer }
+    ServiceCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [planVersionId, serviceType, billingDay, routerId]
+      properties:
+        planVersionId: { type: string, format: uuid }
+        serviceType: { type: string, enum: [simple_queue, pppoe, hotspot] }
+        billingDay: { type: integer, minimum: 1, maximum: 28 }
+        routerId: { type: string, format: uuid }
+        ipAddressId: { type: string, format: uuid }
+        serviceAddressId: { type: string, format: uuid }
+    Service:
+      type: object
+      required: [id, clientId, planVersionId, serviceType, lifecycleStatus]
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        planVersionId: { type: string, format: uuid }
+        serviceType: { type: string }
+        lifecycleStatus: { type: string, enum: [pending, active, suspended, cancelled, failed] }
+        billingDay: { type: integer }
+        startedOn: { type: string, format: date }
+    PaymentAllocationInput:
+      type: object
+      additionalProperties: false
+      required: [invoiceId, amountCents]
+      properties:
+        invoiceId: { type: string, format: uuid }
+        amountCents: { type: integer, minimum: 1 }
+    PaymentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [clientId, amountCents, currencyCode, receivedAt, method]
+      properties:
+        clientId: { type: string, format: uuid }
+        amountCents: { type: integer, minimum: 1 }
+        currencyCode: { type: string, pattern: '^[A-Z]{3}$', example: GTQ }
+        receivedAt: { type: string, format: date-time }
+        method: { type: string, enum: [cash, transfer, card, online, other] }
+        externalReference: { type: string, maxLength: 120 }
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentAllocationInput' }
+    Payment:
+      type: object
+      required: [id, clientId, amountCents, currencyCode, receivedAt, status]
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        amountCents: { type: integer }
+        currencyCode: { type: string }
+        receivedAt: { type: string, format: date-time }
+        method: { type: string }
+        status: { type: string, enum: [recorded, reversed] }
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentAllocationInput' }
+    PaymentPage:
+      type: object
+      required: [data, page, pageSize, total]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    AccountSummary:
+      type: object
+      required: [clientId, currencyCode, debtCents, creditCents, overdueCents]
+      properties:
+        clientId: { type: string, format: uuid }
+        currencyCode: { type: string }
+        debtCents: { type: integer }
+        creditCents: { type: integer }
+        overdueCents: { type: integer }
+        nextDueOn: { type: [string, 'null'], format: date }
+        invoiceCount: { type: integer }
+    SimpleQueueRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceId, routerId]
+      properties:
+        serviceId: { type: string, format: uuid }
+        routerId: { type: string, format: uuid }
+        forceReconcile: { type: boolean, default: false }
+    ServiceStateRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceId, reasonCode]
+      properties:
+        serviceId: { type: string, format: uuid }
+        reasonCode: { type: string, maxLength: 64 }
+        reasonDetail: { type: string, maxLength: 500 }
+    OperationAccepted:
+      type: object
+      required: [operationId, status, correlationId]
+      properties:
+        operationId: { type: string, format: uuid }
+        status: { type: string, enum: [queued] }
+        correlationId: { type: string, format: uuid }
+    Operation:
+      type: object
+      required: [id, serviceId, type, status, attemptCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        type: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled, manual_review] }
+        attemptCount: { type: integer }
+        lastError: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+    Dashboard:
+      type: object
+      required: [asOf, activeServices, suspendedServices, overdueServices, revenue]
+      properties:
+        asOf: { type: string, format: date-time }
+        activeServices: { type: integer }
+        suspendedServices: { type: integer }
+        overdueServices: { type: integer }
+        newClients: { type: integer }
+        revenue:
+          type: object
+          required: [dailyCents, monthlyCents, currencyCode]
+          properties:
+            dailyCents: { type: integer }
+            monthlyCents: { type: integer }
+            currencyCode: { type: string }
+        topPlans:
+          type: array
+          items:
+            type: object
+            required: [planId, name, activeServices]
+            properties:
+              planId: { type: string, format: uuid }
+              name: { type: string }
+              activeServices: { type: integer }
+    ReportResult:
+      type: object
+      required: [generatedAt, data]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        data:
+          type: array
+          items: { type: object, additionalProperties: true }
+    DomainEvent:
+      type: object
+      required: [eventId, eventType, schemaVersion, occurredAt, aggregate, payload]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string, example: PaymentRecorded.v1 }
+        schemaVersion: { type: integer, minimum: 1 }
+        occurredAt: { type: string, format: date-time }
+        aggregate:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string }
+            id: { type: string, format: uuid }
+        correlationId: { type: string, format: uuid }
+        payload: { type: object, additionalProperties: true }
+    EventAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [processed, failed] }
+        detail: { type: string, maxLength: 1000 }
+    AiMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [channel, senderId, message]
+      properties:
+        channel: { type: string, enum: [whatsapp, web, telegram] }
+        senderId: { type: string, maxLength: 160 }
+        message: { type: string, minLength: 1, maxLength: 4000 }
+        conversationId: { type: string, maxLength: 128 }
+        confirmationToken: { type: string, maxLength: 256 }
+    AiMessageResponse:
+      type: object
+      required: [message, outcome]
+      properties:
+        message: { type: string }
+        outcome: { type: string, enum: [answered, confirmation_required, operation_requested, rejected] }
+        operationId: { type: [string, 'null'], format: uuid }
+        confirmationToken: { type: [string, 'null'] }
+    ApiError:
+      type: object
+      required: [code, message, correlationId]
+      properties:
+        code: { type: string, example: RESOURCE_NOT_FOUND }
+        message: { type: string }
+        correlationId: { type: string, format: uuid }
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/ApiError'
+        - type: object
+          required: [fields]
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                required: [path, message]
+                properties:
+                  path: { type: string }
+                  message: { type: string }
