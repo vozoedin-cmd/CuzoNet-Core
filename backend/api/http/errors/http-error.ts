@@ -3,17 +3,28 @@ import { ApplicationError } from '../../../shared/errors/application-error.js';
 export interface ApiError {
   code: string;
   correlationId: string;
+  fields?: readonly {
+    message: string;
+    path: string;
+  }[];
   message: string;
 }
 
 export interface HttpError {
   code: string;
+  fields?: readonly {
+    message: string;
+    path: string;
+  }[];
   message: string;
   statusCode: number;
 }
 
 const applicationErrorStatusCodes: Readonly<Record<string, number>> = {
+  CLIENT_DOCUMENT_CONFLICT: 409,
+  INVALID_CLIENT_DATA: 422,
   RESOURCE_NOT_FOUND: 404,
+  VALIDATION_ERROR: 422,
 };
 
 const internalServerError: HttpError = {
@@ -29,6 +40,7 @@ export function toHttpError(error: unknown): HttpError {
     if (statusCode !== undefined) {
       return {
         code: error.code,
+        ...(error.details === undefined ? {} : { fields: error.details }),
         message: error.message,
         statusCode,
       };
@@ -42,6 +54,7 @@ export function toApiError(error: HttpError, correlationId: string): ApiError {
   return {
     code: error.code,
     correlationId,
+    ...(error.fields === undefined ? {} : { fields: error.fields }),
     message: error.message,
   };
 }

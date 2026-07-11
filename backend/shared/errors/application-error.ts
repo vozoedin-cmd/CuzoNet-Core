@@ -1,5 +1,11 @@
+export interface ApplicationErrorDetail {
+  message: string;
+  path: string;
+}
+
 export interface ApplicationErrorOptions {
   code: string;
+  details?: readonly ApplicationErrorDetail[];
   message: string;
 }
 
@@ -9,10 +15,12 @@ export interface ApplicationErrorOptions {
  */
 export class ApplicationError extends Error {
   public readonly code: string;
+  public readonly details: readonly ApplicationErrorDetail[] | undefined;
 
-  public constructor({ code, message }: ApplicationErrorOptions) {
+  public constructor({ code, details, message }: ApplicationErrorOptions) {
     super(message);
     this.name = 'ApplicationError';
     this.code = code;
+    this.details = details;
   }
 }
