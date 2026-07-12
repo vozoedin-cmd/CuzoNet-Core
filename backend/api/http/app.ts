@@ -8,6 +8,7 @@ import { healthRouter } from './routes/health.route.js';
 
 export interface AppDependencies {
   clientsRouter?: Router;
+  provisioningRouter?: Router;
   servicesRouter?: Router;
 }
 
@@ -24,6 +25,9 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   }
   if (dependencies.servicesRouter !== undefined) {
     app.use(dependencies.servicesRouter);
+  }
+  if (dependencies.provisioningRouter !== undefined) {
+    app.use(dependencies.provisioningRouter);
   }
   app.use(notFoundMiddleware);
   app.use(errorHandlerMiddleware);

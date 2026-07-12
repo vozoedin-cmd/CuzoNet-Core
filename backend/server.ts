@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { createClientsRouter } from './api/clients/routes/clients.routes.js';
 import { createApp } from './api/http/app.js';
+import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
+import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
 import { ServicesController } from './api/services/controller/services.controller.js';
 import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
@@ -13,17 +15,29 @@ import { UpdateClient } from './application/use-cases/clients/update-client/upda
 import { CreateService } from './application/use-cases/services/create-service/create-service.use-case.js';
 import { GetService } from './application/use-cases/services/get-service/get-service.use-case.js';
 import { ListClientServices } from './application/use-cases/services/list-client-services/list-client-services.use-case.js';
+import { GetProvisioningOperation } from './application/use-cases/provisioning/get-provisioning-operation/get-provisioning-operation.use-case.js';
+import { RequestProvisioningOperation } from './application/use-cases/provisioning/request-provisioning-operation/request-provisioning-operation.use-case.js';
 import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
+import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
 import { environment } from './infrastructure/config/environment.js';
 import { InMemoryClientRepository } from './infrastructure/database/clients/in-memory/in-memory-client-repository.js';
 import { InMemoryServiceRepository } from './infrastructure/database/services/in-memory/in-memory-service-repository.js';
+import { InMemoryProvisioningOperationRepository } from './infrastructure/database/provisioning/in-memory/in-memory-provisioning-operation-repository.js';
+import { InMemoryProvisioningUnitOfWork } from './infrastructure/database/provisioning/in-memory/in-memory-provisioning-unit-of-work.js';
+import { InMemoryOutbox } from './infrastructure/events/in-memory-outbox.js';
 import { UuidV7IdGenerator } from './infrastructure/identity/uuid-v7-id-generator.js';
 import { logger } from './infrastructure/logging/logger.js';
+import { ExponentialRetryPolicy } from './infrastructure/provisioning/retry/exponential-retry-policy.js';
+import { ServiceReaderProvisioningAdapter } from './infrastructure/provisioning/services/service-reader-provisioning.adapter.js';
 
 const shutdownTimeoutMs = 10_000;
 const clientRepository = new InMemoryClientRepository();
 const serviceRepository = new InMemoryServiceRepository();
+const provisioningRepository = new InMemoryProvisioningOperationRepository();
+const provisioningOutbox = new InMemoryOutbox();
+const provisioningUnitOfWork = new InMemoryProvisioningUnitOfWork();
+const provisioningRetryPolicy = new ExponentialRetryPolicy(3);
 const idGenerator = new UuidV7IdGenerator();
 const temporaryCompanyId = idGenerator.generate();
 const companyContext: CompanyContext = {
@@ -32,6 +46,7 @@ const companyContext: CompanyContext = {
 const clock: Clock = {
   now: () => new Date(),
 };
+const actorContext: ActorContext = { getActorId: () => 'temporary-server-context' };
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
   createClient: new CreateClient(clientRepository, companyContext, idGenerator, clock),
@@ -52,7 +67,23 @@ const servicesController = new ServicesController({
   listClientServices: new ListClientServices(serviceRepository, companyContext),
 });
 const servicesRouter = createServicesRouter(servicesController);
-const server = createServer(createApp({ clientsRouter, servicesRouter }));
+const provisioningController = new ProvisioningController({
+  getOperation: new GetProvisioningOperation(provisioningRepository, companyContext),
+  requestOperation: new RequestProvisioningOperation(
+    provisioningRepository,
+    provisioningRepository,
+    new ServiceReaderProvisioningAdapter(serviceRepository),
+    provisioningOutbox,
+    provisioningUnitOfWork,
+    companyContext,
+    actorContext,
+    idGenerator,
+    clock,
+    provisioningRetryPolicy,
+  ),
+});
+const provisioningRouter = createProvisioningRouter(provisioningController);
+const server = createServer(createApp({ clientsRouter, provisioningRouter, servicesRouter }));
 
 let isShuttingDown = false;
 
