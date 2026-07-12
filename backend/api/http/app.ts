@@ -7,6 +7,7 @@ import { requestLoggerMiddleware } from './middlewares/request-logger.middleware
 import { healthRouter } from './routes/health.route.js';
 
 export interface AppDependencies {
+  billingRouter?: Router;
   clientsRouter?: Router;
   provisioningRouter?: Router;
   servicesRouter?: Router;
@@ -20,6 +21,9 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   app.use(requestLoggerMiddleware);
   app.use(express.json());
   app.use(healthRouter);
+  if (dependencies.billingRouter !== undefined) {
+    app.use(dependencies.billingRouter);
+  }
   if (dependencies.clientsRouter !== undefined) {
     app.use(dependencies.clientsRouter);
   }
