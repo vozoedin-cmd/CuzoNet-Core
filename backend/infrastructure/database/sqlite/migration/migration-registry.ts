@@ -5,6 +5,7 @@ import { foundationMigration } from '../migrations/0001-foundation.js';
 import { outboxIdempotencyMigration } from '../migrations/0006-outbox-idempotency.js';
 import { provisioningMigration } from '../migrations/0005-provisioning.js';
 import { servicesMigration } from '../migrations/0003-services.js';
+import { workersMigration } from '../migrations/0008-workers.js';
 import type { Migration } from './migration.js';
 
 export const migrations: readonly Migration[] = Object.freeze([
@@ -15,4 +16,5 @@ export const migrations: readonly Migration[] = Object.freeze([
   provisioningMigration,
   outboxIdempotencyMigration,
   automationMigration,
+  workersMigration,
 ]);

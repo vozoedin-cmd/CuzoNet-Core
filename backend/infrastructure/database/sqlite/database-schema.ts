@@ -262,6 +262,32 @@ export interface AutomationExecutionTable {
   status: string;
 }
 
+export interface WorkLeaseTable {
+  acquired_at: string;
+  expires_at: string;
+  fencing_token: number;
+  owner_id: string;
+  renewed_at: string;
+  role: 'automation' | 'outbox' | 'provisioning';
+  work_id: string;
+}
+
+export interface WorkerStatisticsTable {
+  failed_count: number;
+  heartbeat_at: string;
+  last_error: Nullable<string>;
+  last_error_at: Nullable<string>;
+  last_success_at: Nullable<string>;
+  lease_lost_count: number;
+  processed_count: number;
+  retry_count: number;
+  role: 'automation' | 'outbox' | 'provisioning';
+  skipped_count: number;
+  started_at: string;
+  stopped_at: Nullable<string>;
+  worker_id: string;
+}
+
 export interface DatabaseSchema {
   automation_executions: AutomationExecutionTable;
   automation_rule_versions: AutomationRuleVersionTable;
@@ -284,4 +310,6 @@ export interface DatabaseSchema {
   payments: PaymentTable;
   provisioning_operations: ProvisioningOperationTable;
   schema_migrations: SchemaMigrationTable;
+  work_leases: WorkLeaseTable;
+  worker_statistics: WorkerStatisticsTable;
 }

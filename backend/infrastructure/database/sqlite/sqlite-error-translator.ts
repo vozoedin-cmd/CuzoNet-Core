@@ -1,4 +1,4 @@
-export function isSqliteConstraintError(error: unknown): boolean {
+export function isSqliteConstraintError(error: unknown): error is Error & { code: string } {
   return (
     error instanceof Error &&
     'code' in error &&

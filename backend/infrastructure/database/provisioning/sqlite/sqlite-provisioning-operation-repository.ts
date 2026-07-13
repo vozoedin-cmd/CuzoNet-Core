@@ -64,10 +64,7 @@ export class SqliteProvisioningOperationRepository
     });
   }
 
-  public findById(
-    companyId: string,
-    operationId: string,
-  ): Promise<ProvisioningOperation | null> {
+  public findById(companyId: string, operationId: string): Promise<ProvisioningOperation | null> {
     return this.session.execute(async (database) => {
       const row = await database
         .selectFrom('provisioning_operations')
@@ -120,23 +117,41 @@ export class SqliteProvisioningOperationRepository
       this.session.execute(async (database) => {
         const row = await database
           .selectFrom('provisioning_operations')
-          .selectAll()
-          .where('company_id', '=', companyId)
-          .where('status', '=', 'queued')
+          .leftJoin('work_leases as lease', (join) =>
+            join
+              .onRef('lease.work_id', '=', 'provisioning_operations.id')
+              .on('lease.role', '=', 'provisioning'),
+          )
+          .selectAll('provisioning_operations')
+          .where('provisioning_operations.company_id', '=', companyId)
           .where((expression) =>
             expression.or([
-              expression('next_attempt_at', 'is', null),
-              expression('next_attempt_at', '<=', at.toISOString()),
+              expression.and([
+                expression('provisioning_operations.status', '=', 'queued'),
+                expression.or([
+                  expression('provisioning_operations.next_attempt_at', 'is', null),
+                  expression('provisioning_operations.next_attempt_at', '<=', at.toISOString()),
+                ]),
+              ]),
+              expression.and([
+                expression('provisioning_operations.status', '=', 'running'),
+                expression.or([
+                  expression('lease.work_id', 'is', null),
+                  expression('lease.expires_at', '<=', at.toISOString()),
+                ]),
+              ]),
             ]),
           )
-          .orderBy('created_at', 'asc')
-          .orderBy('id', 'asc')
+          .orderBy('provisioning_operations.created_at', 'asc')
+          .orderBy('provisioning_operations.id', 'asc')
           .limit(1)
           .executeTakeFirst();
         if (row === undefined) return null;
         const operation = sqliteProvisioningOperationMapper.toDomain(row);
-        operation.start(at);
-        await this.save(operation);
+        if (operation.status.value === 'queued') {
+          operation.start(at);
+          await this.save(operation);
+        }
         return operation;
       }),
     );

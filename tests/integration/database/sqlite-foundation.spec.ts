@@ -45,9 +45,9 @@ describe('SQLite foundation integration', () => {
       )
       .get();
 
-    expect(runner.currentVersion()).toBe(7);
-    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(metadata).toMatchObject({ database_version: 1, schema_version: 7 });
+    expect(runner.currentVersion()).toBe(8);
+    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(metadata).toMatchObject({ database_version: 1, schema_version: 8 });
     expect(expiresIndex).toBeDefined();
   });
 
