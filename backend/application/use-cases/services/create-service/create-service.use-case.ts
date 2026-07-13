@@ -8,6 +8,10 @@ import type { Clock } from '../../../ports/clock.port.js';
 import type { CompanyContext } from '../../../ports/company-context.port.js';
 import type { IdGenerator } from '../../../ports/id-generator.port.js';
 import type { ServiceRepository } from '../../../ports/services/service-repository.port.js';
+import type {
+  ServiceOutboxPort,
+  ServiceUnitOfWork,
+} from '../../../ports/services/service-outbox.port.js';
 import { ClientNotFoundError } from '../../../../domain/clients/errors/client-not-found.error.js';
 import { Service } from '../../../../domain/services/service.js';
 import { ClientCannotReceiveServiceError } from '../../../../domain/services/errors/client-cannot-receive-service.error.js';
@@ -24,6 +28,8 @@ export class CreateService {
     private readonly companyContext: CompanyContext,
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
+    private readonly outbox: ServiceOutboxPort = { append: () => Promise.resolve() },
+    private readonly unitOfWork: ServiceUnitOfWork = { execute: (work) => work() },
   ) {}
 
   public async execute(input: CreateServiceInput): Promise<CreateServiceResult> {
@@ -53,10 +59,14 @@ export class CreateService {
       serviceType: ServiceType.create(input.serviceType),
     });
 
-    await this.serviceRepository.save(service);
+    const domainEvents = service.pullDomainEvents();
+    await this.unitOfWork.execute(async () => {
+      await this.serviceRepository.save(service);
+      await this.outbox.append(domainEvents);
+    });
 
     return {
-      domainEvents: service.pullDomainEvents(),
+      domainEvents,
       service: toServiceDto(service),
     };
   }

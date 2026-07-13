@@ -19,6 +19,9 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535),
   TIMEZONE: timeZoneSchema,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']),
+  DATABASE_PATH: z.string().trim().min(1).default('./storage/cuzonet.sqlite'),
+  DATABASE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+  DATABASE_BACKUP_PATH: z.string().trim().min(1).default('./storage/backups'),
 });
 
 const parsedEnvironment = environmentSchema.safeParse({
@@ -27,6 +30,9 @@ const parsedEnvironment = environmentSchema.safeParse({
   PORT: process.env.PORT,
   TIMEZONE: process.env.TIMEZONE,
   LOG_LEVEL: process.env.LOG_LEVEL,
+  DATABASE_PATH: process.env.DATABASE_PATH,
+  DATABASE_BUSY_TIMEOUT_MS: process.env.DATABASE_BUSY_TIMEOUT_MS,
+  DATABASE_BACKUP_PATH: process.env.DATABASE_BACKUP_PATH,
 });
 
 if (!parsedEnvironment.success) {

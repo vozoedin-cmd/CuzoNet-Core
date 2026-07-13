@@ -6,6 +6,10 @@ import {
 import type { Clock } from '../../../ports/clock.port.js';
 import type { CompanyContext } from '../../../ports/company-context.port.js';
 import type { ClientRepository } from '../../../ports/clients/client-repository.port.js';
+import type {
+  ClientOutboxPort,
+  ClientUnitOfWork,
+} from '../../../ports/clients/client-outbox.port.js';
 import type { IdGenerator } from '../../../ports/id-generator.port.js';
 import { Client } from '../../../../domain/clients/client.js';
 import { DuplicateClientDocumentError } from '../../../../domain/clients/errors/duplicate-client-document.error.js';
@@ -23,6 +27,8 @@ export class CreateClient {
     private readonly companyContext: CompanyContext,
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
+    private readonly outbox: ClientOutboxPort = { append: () => Promise.resolve() },
+    private readonly unitOfWork: ClientUnitOfWork = { execute: (work) => work() },
   ) {}
 
   public async execute(input: CreateClientInput): Promise<CreateClientResult> {
@@ -49,11 +55,15 @@ export class CreateClient {
       note: input.note === undefined ? undefined : ClientNote.create(input.note),
     });
 
-    await this.clientRepository.save(client);
+    const domainEvents = client.pullDomainEvents();
+    await this.unitOfWork.execute(async () => {
+      await this.clientRepository.save(client);
+      await this.outbox.append(domainEvents);
+    });
 
     return {
       client: toClientDto(client),
-      domainEvents: client.pullDomainEvents(),
+      domainEvents,
     };
   }
 }

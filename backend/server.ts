@@ -27,47 +27,67 @@ import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
 import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
 import { environment } from './infrastructure/config/environment.js';
-import { InMemoryClientRepository } from './infrastructure/database/clients/in-memory/in-memory-client-repository.js';
-import { InMemoryBillingUnitOfWork } from './infrastructure/database/billing/in-memory/in-memory-billing-unit-of-work.js';
-import { InMemoryInvoiceRepository } from './infrastructure/database/billing/invoices/in-memory/in-memory-invoice-repository.js';
-import { InMemoryPaymentRepository } from './infrastructure/database/billing/payments/in-memory/in-memory-payment-repository.js';
+import { SqliteClientRepository } from './infrastructure/database/clients/sqlite/sqlite-client-repository.js';
+import { SqliteInvoiceRepository } from './infrastructure/database/billing/invoices/sqlite/sqlite-invoice-repository.js';
+import { SqlitePaymentRepository } from './infrastructure/database/billing/payments/sqlite/sqlite-payment-repository.js';
 import { ClientBillingReaderAdapter } from './infrastructure/billing/clients/client-billing-reader.adapter.js';
-import { InMemoryCompanyBillingSettings } from './infrastructure/billing/settings/in-memory-company-billing-settings.js';
-import { InMemoryBillingOutbox } from './infrastructure/events/in-memory-billing-outbox.js';
-import { InMemoryServiceRepository } from './infrastructure/database/services/in-memory/in-memory-service-repository.js';
-import { InMemoryProvisioningOperationRepository } from './infrastructure/database/provisioning/in-memory/in-memory-provisioning-operation-repository.js';
-import { InMemoryProvisioningUnitOfWork } from './infrastructure/database/provisioning/in-memory/in-memory-provisioning-unit-of-work.js';
-import { InMemoryOutbox } from './infrastructure/events/in-memory-outbox.js';
+import { SqliteCompanyBillingSettings } from './infrastructure/billing/settings/sqlite-company-billing-settings.js';
+import { SqliteOutboxRepository } from './infrastructure/events/sqlite/sqlite-outbox-repository.js';
+import { SqliteServiceRepository } from './infrastructure/database/services/sqlite/sqlite-service-repository.js';
+import { SqliteProvisioningOperationRepository } from './infrastructure/database/provisioning/sqlite/sqlite-provisioning-operation-repository.js';
+import { CompanyBootstrap } from './infrastructure/database/sqlite/bootstrap/company-bootstrap.js';
+import { DatabaseHealthChecker } from './infrastructure/database/sqlite/database-health-checker.js';
+import { MigrationRunner } from './infrastructure/database/sqlite/migration/migration-runner.js';
+import { SqliteDatabase } from './infrastructure/database/sqlite/sqlite-database.js';
+import { SqliteUnitOfWork } from './infrastructure/database/sqlite/sqlite-unit-of-work.js';
 import { UuidV7IdGenerator } from './infrastructure/identity/uuid-v7-id-generator.js';
 import { logger } from './infrastructure/logging/logger.js';
 import { ExponentialRetryPolicy } from './infrastructure/provisioning/retry/exponential-retry-policy.js';
 import { ServiceReaderProvisioningAdapter } from './infrastructure/provisioning/services/service-reader-provisioning.adapter.js';
+import { SqliteSingleCompanyContext } from './infrastructure/tenancy/sqlite-single-company-context.js';
 
 const shutdownTimeoutMs = 10_000;
-const clientRepository = new InMemoryClientRepository();
-const serviceRepository = new InMemoryServiceRepository();
-const provisioningRepository = new InMemoryProvisioningOperationRepository();
-const provisioningOutbox = new InMemoryOutbox();
-const provisioningUnitOfWork = new InMemoryProvisioningUnitOfWork();
-const provisioningRetryPolicy = new ExponentialRetryPolicy(3);
-const billingInvoiceRepository = new InMemoryInvoiceRepository();
-const billingPaymentRepository = new InMemoryPaymentRepository();
-const billingOutbox = new InMemoryBillingOutbox();
-const billingUnitOfWork = new InMemoryBillingUnitOfWork();
-const billingSettings = new InMemoryCompanyBillingSettings();
 const idGenerator = new UuidV7IdGenerator();
-const temporaryCompanyId = idGenerator.generate();
-const companyContext: CompanyContext = {
-  getCompanyId: () => temporaryCompanyId,
-};
 const clock: Clock = {
   now: () => new Date(),
 };
+const sqlite = new SqliteDatabase({
+  busyTimeoutMs: environment.DATABASE_BUSY_TIMEOUT_MS,
+  path: environment.DATABASE_PATH,
+});
+new MigrationRunner(sqlite.connection, clock).migrate();
+const companyId = await new CompanyBootstrap(sqlite.session, idGenerator).bootstrap(
+  {
+    currencyCode: 'GTQ',
+    displayName: environment.APP_NAME,
+    legalName: environment.APP_NAME,
+    timezone: environment.TIMEZONE,
+  },
+  clock.now(),
+);
+new DatabaseHealthChecker(sqlite.connection).assertHealthy();
+const companyContext: CompanyContext = new SqliteSingleCompanyContext(companyId);
+const unitOfWork = new SqliteUnitOfWork(sqlite.session);
+const outbox = new SqliteOutboxRepository(sqlite.session);
+const clientRepository = new SqliteClientRepository(sqlite.session, idGenerator);
+const serviceRepository = new SqliteServiceRepository(sqlite.session);
+const provisioningRepository = new SqliteProvisioningOperationRepository(sqlite.session);
+const provisioningRetryPolicy = new ExponentialRetryPolicy(3);
+const billingInvoiceRepository = new SqliteInvoiceRepository(sqlite.session);
+const billingPaymentRepository = new SqlitePaymentRepository(sqlite.session);
+const billingSettings = new SqliteCompanyBillingSettings(sqlite.session);
 const actorContext: ActorContext = { getActorId: () => 'temporary-server-context' };
 const billingActorContext: BillingActorContext = { getActorId: () => 'temporary-server-context' };
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
-  createClient: new CreateClient(clientRepository, companyContext, idGenerator, clock),
+  createClient: new CreateClient(
+    clientRepository,
+    companyContext,
+    idGenerator,
+    clock,
+    outbox,
+    unitOfWork,
+  ),
   getClient: new GetClient(clientRepository, companyContext),
   listClients: new ListClients(clientRepository, companyContext),
   updateClient: new UpdateClient(clientRepository, companyContext, clock),
@@ -93,8 +113,8 @@ const billingController = new BillingController({
     billingPaymentRepository,
     clientBillingReader,
     billingSettings,
-    billingOutbox,
-    billingUnitOfWork,
+    outbox,
+    unitOfWork,
     companyContext,
     billingActorContext,
     idGenerator,
@@ -109,6 +129,8 @@ const servicesController = new ServicesController({
     companyContext,
     idGenerator,
     clock,
+    outbox,
+    unitOfWork,
   ),
   getService: new GetService(serviceRepository, companyContext),
   listClientServices: new ListClientServices(serviceRepository, companyContext),
@@ -120,8 +142,8 @@ const provisioningController = new ProvisioningController({
     provisioningRepository,
     provisioningRepository,
     new ServiceReaderProvisioningAdapter(serviceRepository),
-    provisioningOutbox,
-    provisioningUnitOfWork,
+    outbox,
+    unitOfWork,
     companyContext,
     actorContext,
     idGenerator,
@@ -151,7 +173,7 @@ function shutdown(signal: NodeJS.Signals): void {
 
   forceShutdownTimer.unref();
 
-  server.close((error) => {
+  server.close(async (error) => {
     clearTimeout(forceShutdownTimer);
 
     if (error !== undefined) {
@@ -164,8 +186,19 @@ function shutdown(signal: NodeJS.Signals): void {
       process.exit(1);
     }
 
-    logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
-    process.exit(0);
+    try {
+      await sqlite.close();
+      logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
+      process.exit(0);
+    } catch (databaseError) {
+      logger.error({
+        action: 'server.database.close.failed',
+        errorName: databaseError instanceof Error ? databaseError.name : 'UnknownError',
+        module: 'server',
+        signal,
+      });
+      process.exit(1);
+    }
   });
 }
 
