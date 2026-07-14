@@ -262,6 +262,22 @@ export interface AutomationExecutionTable {
   status: string;
 }
 
+export interface MikrotikResourceTable {
+  company_id: string;
+  created_at: string;
+  desired_hash: Nullable<string>;
+  id: string;
+  last_reconciled_at: Nullable<string>;
+  observed_hash: Nullable<string>;
+  remote_id: Nullable<string>;
+  remote_name: Nullable<string>;
+  resource_type: 'simple_queue';
+  router_id: string;
+  service_id: string;
+  status: 'applied' | 'pending';
+  updated_at: string;
+}
+
 export interface WorkLeaseTable {
   acquired_at: string;
   expires_at: string;
@@ -308,6 +324,7 @@ export interface DatabaseSchema {
   outbox_events: OutboxEventTable;
   payment_allocations: PaymentAllocationTable;
   payments: PaymentTable;
+  mikrotik_resources: MikrotikResourceTable;
   provisioning_operations: ProvisioningOperationTable;
   schema_migrations: SchemaMigrationTable;
   work_leases: WorkLeaseTable;
