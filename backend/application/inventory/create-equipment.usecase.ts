@@ -1,8 +1,8 @@
-import type { EquipmentRepository } from '../../domain/equipment/equipment.repository.js';
-import { Equipment } from '../../domain/equipment/equipment.js';
-import { EquipmentRole } from '../../domain/equipment/equipment-role.js';
-import { EquipmentType } from '../../domain/equipment/equipment-type.js';
-import { EquipmentCapabilities, type EquipmentCapabilitiesProps } from '../../domain/equipment/equipment-capabilities.js';
+import type { EquipmentRepository } from '../../domain/inventory/equipment.repository.js';
+import { Equipment } from '../../domain/inventory/equipment.js';
+import { EquipmentRole } from '../../domain/inventory/equipment-role.js';
+import { EquipmentType } from '../../domain/inventory/equipment-type.js';
+import { EquipmentCapabilities, type EquipmentCapabilitiesProps } from '../../domain/inventory/equipment-capabilities.js';
 import type { IdGenerator } from '../ports/id-generator.port.js';
 
 export interface CreateEquipmentCommand {

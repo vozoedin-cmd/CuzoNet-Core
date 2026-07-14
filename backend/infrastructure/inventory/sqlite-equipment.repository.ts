@@ -1,11 +1,11 @@
 import type { Database } from 'better-sqlite3';
-import type { EquipmentRepository } from '../../domain/equipment/equipment.repository.js';
-import { Equipment } from '../../domain/equipment/equipment.js';
-import { EquipmentRole } from '../../domain/equipment/equipment-role.js';
-import { EquipmentType } from '../../domain/equipment/equipment-type.js';
-import { EquipmentCapabilities } from '../../domain/equipment/equipment-capabilities.js';
-import { EquipmentInterface } from '../../domain/equipment/equipment-interface.js';
-import { EquipmentAssignment } from '../../domain/equipment/equipment-assignment.js';
+import type { EquipmentRepository } from '../../domain/inventory/equipment.repository.js';
+import { Equipment } from '../../domain/inventory/equipment.js';
+import { EquipmentRole } from '../../domain/inventory/equipment-role.js';
+import { EquipmentType } from '../../domain/inventory/equipment-type.js';
+import { EquipmentCapabilities } from '../../domain/inventory/equipment-capabilities.js';
+import { EquipmentInterface } from '../../domain/inventory/equipment-interface.js';
+import { EquipmentAssignment } from '../../domain/inventory/equipment-assignment.js';
 
 export class SqliteEquipmentRepository implements EquipmentRepository {
   constructor(private readonly db: Database) {}

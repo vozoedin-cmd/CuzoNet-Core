@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { EquipmentRole } from '../../../../backend/domain/equipment/equipment-role.js';
-import { EquipmentType } from '../../../../backend/domain/equipment/equipment-type.js';
-import { EquipmentCapabilities } from '../../../../backend/domain/equipment/equipment-capabilities.js';
-import { Equipment } from '../../../../backend/domain/equipment/equipment.js';
-import { EquipmentAssignment } from '../../../../backend/domain/equipment/equipment-assignment.js';
+import { EquipmentRole } from '../../../../backend/domain/inventory/equipment-role.js';
+import { EquipmentType } from '../../../../backend/domain/inventory/equipment-type.js';
+import { EquipmentCapabilities } from '../../../../backend/domain/inventory/equipment-capabilities.js';
+import { Equipment } from '../../../../backend/domain/inventory/equipment.js';
+import { EquipmentAssignment } from '../../../../backend/domain/inventory/equipment-assignment.js';
 
 describe('Equipment', () => {
   it('should create an equipment successfully', () => {

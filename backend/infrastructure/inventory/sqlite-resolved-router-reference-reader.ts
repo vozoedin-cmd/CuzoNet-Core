@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import type { ResolvedRouterReference, ResolvedRouterReferenceReader } from '../../application/equipment/resolved-router-reference.js';
+import type { ResolvedRouterReference, ResolvedRouterReferenceReader } from '../../application/inventory/resolved-router-reference.js';
 
 export class SqliteResolvedRouterReferenceReader implements ResolvedRouterReferenceReader {
   constructor(private readonly db: Database) {}

@@ -1,4 +1,4 @@
-import type { CreateEquipmentUseCase, CreateEquipmentCommand } from '../../application/equipment/create-equipment.usecase.js';
+import type { CreateEquipmentUseCase, CreateEquipmentCommand } from '../../application/inventory/create-equipment.usecase.js';
 
 export interface HttpRequest {
   body: Record<string, unknown>;
