@@ -1,4 +1,4 @@
-import { ApplicationError } from '../../../shared/errors/application-error.js';
+﻿import { ApplicationError } from '../../../shared/errors/application-error.js';
 
 export interface ApiError {
   code: string;
@@ -28,9 +28,12 @@ const applicationErrorStatusCodes: Readonly<Record<string, number>> = {
   INVALID_BILLING_DATA: 422,
   INVALID_SERVICE_DATA: 422,
   INVALID_PROVISIONING_DATA: 422,
+  INVALID_PLAN_DATA: 422,
+  PLAN_CODE_CONFLICT: 409,
   PROVISIONING_OPERATION_CONFLICT: 409,
   PROVISIONING_STATE_CONFLICT: 409,
   RESOURCE_NOT_FOUND: 404,
+  UNSUPPORTED_PLAN_SERVICE_TYPE: 422,
   VALIDATION_ERROR: 422,
 };
 

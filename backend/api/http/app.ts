@@ -1,4 +1,4 @@
-import express, { type Express, type Router } from 'express';
+﻿import express, { type Express, type Router } from 'express';
 
 import { errorHandlerMiddleware } from './middlewares/error-handler.middleware.js';
 import { correlationIdMiddleware } from './middlewares/correlation-id.middleware.js';
@@ -9,6 +9,7 @@ import { healthRouter } from './routes/health.route.js';
 export interface AppDependencies {
   billingRouter?: Router;
   clientsRouter?: Router;
+  plansRouter?: Router;
   provisioningRouter?: Router;
   servicesRouter?: Router;
 }
@@ -26,6 +27,9 @@ export function createApp(dependencies: AppDependencies = {}): Express {
   }
   if (dependencies.clientsRouter !== undefined) {
     app.use(dependencies.clientsRouter);
+  }
+  if (dependencies.plansRouter !== undefined) {
+    app.use(dependencies.plansRouter);
   }
   if (dependencies.servicesRouter !== undefined) {
     app.use(dependencies.servicesRouter);

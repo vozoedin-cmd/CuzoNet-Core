@@ -1,4 +1,4 @@
-type Nullable<T> = T | null;
+﻿type Nullable<T> = T | null;
 
 export interface SchemaMigrationTable {
   applied_at: string;
@@ -88,6 +88,31 @@ export interface ClientServiceTable {
   started_on: Nullable<string>;
 }
 
+
+export interface PlanTable {
+  code: string;
+  company_id: string;
+  created_at: string;
+  id: string;
+  is_active: number;
+  name: string;
+  service_type: 'simple_queue' | 'pppoe' | 'hotspot';
+  updated_at: Nullable<string>;
+}
+
+export interface PlanVersionTable {
+  burst_download_kbps: Nullable<number>;
+  burst_upload_kbps: Nullable<number>;
+  created_at: string;
+  download_kbps: number;
+  effective_from: string;
+  id: string;
+  plan_id: string;
+  price_cents: number;
+  priority: Nullable<number>;
+  upload_kbps: number;
+  version_number: number;
+}
 export interface BillingAccountTable {
   client_id: string;
   closed_at: Nullable<string>;
@@ -324,6 +349,8 @@ export interface DatabaseSchema {
   outbox_events: OutboxEventTable;
   payment_allocations: PaymentAllocationTable;
   payments: PaymentTable;
+  plan_versions: PlanVersionTable;
+  plans: PlanTable;
   mikrotik_resources: MikrotikResourceTable;
   provisioning_operations: ProvisioningOperationTable;
   schema_migrations: SchemaMigrationTable;

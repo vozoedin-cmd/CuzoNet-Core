@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+﻿import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,9 +45,9 @@ describe('SQLite foundation integration', () => {
       )
       .get();
 
-    expect(runner.currentVersion()).toBe(9);
-    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(metadata).toMatchObject({ database_version: 1, schema_version: 9 });
+    expect(runner.currentVersion()).toBe(10);
+    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(metadata).toMatchObject({ database_version: 1, schema_version: 10 });
     expect(expiresIndex).toBeDefined();
   });
 
@@ -57,7 +57,7 @@ describe('SQLite foundation integration', () => {
     expect(database.connection.pragma('busy_timeout', { simple: true })).toBe(2_500);
   });
 
-  it('crea una sola empresa exclusivamente cuando companies está vacía', async () => {
+  it('crea una sola empresa exclusivamente cuando companies estÃ¡ vacÃ­a', async () => {
     new MigrationRunner(database.connection).migrate();
     const bootstrap = new CompanyBootstrap(database.session, new UuidV7IdGenerator());
     const first = await bootstrap.bootstrap(

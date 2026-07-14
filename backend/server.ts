@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+﻿import { createServer } from 'node:http';
 
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { BillingController } from './api/billing/controller/billing.controller.js';
@@ -7,6 +7,8 @@ import { createClientsRouter } from './api/clients/routes/clients.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
 import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
+import { PlansController } from './api/plans/controller/plans.controller.js';
+import { createPlansRouter } from './api/plans/routes/plans.routes.js';
 import { ServicesController } from './api/services/controller/services.controller.js';
 import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
@@ -14,6 +16,9 @@ import { CreateClient } from './application/use-cases/clients/create-client/crea
 import { GetClient } from './application/use-cases/clients/get-client/get-client.use-case.js';
 import { ListClients } from './application/use-cases/clients/list-clients/list-clients.use-case.js';
 import { UpdateClient } from './application/use-cases/clients/update-client/update-client.use-case.js';
+import { CreatePlan } from './application/use-cases/plans/create-plan/create-plan.use-case.js';
+import { ListPlans } from './application/use-cases/plans/list-plans/list-plans.use-case.js';
+import { RevisePlan } from './application/use-cases/plans/revise-plan/revise-plan.use-case.js';
 import { CreateService } from './application/use-cases/services/create-service/create-service.use-case.js';
 import { GetService } from './application/use-cases/services/get-service/get-service.use-case.js';
 import { ListClientServices } from './application/use-cases/services/list-client-services/list-client-services.use-case.js';
@@ -28,6 +33,8 @@ import type { CompanyContext } from './application/ports/company-context.port.js
 import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
 import { environment } from './infrastructure/config/environment.js';
 import { SqliteClientRepository } from './infrastructure/database/clients/sqlite/sqlite-client-repository.js';
+import { SqlitePlanRepository } from './infrastructure/database/plans/sqlite/sqlite-plan-repository.js';
+import { SqlitePlanReader } from './infrastructure/plans/readers/sqlite-plan-reader.js';
 import { SqliteInvoiceRepository } from './infrastructure/database/billing/invoices/sqlite/sqlite-invoice-repository.js';
 import { SqlitePaymentRepository } from './infrastructure/database/billing/payments/sqlite/sqlite-payment-repository.js';
 import { ClientBillingReaderAdapter } from './infrastructure/billing/clients/client-billing-reader.adapter.js';
@@ -70,6 +77,8 @@ const companyContext: CompanyContext = new SqliteSingleCompanyContext(companyId)
 const unitOfWork = new SqliteUnitOfWork(sqlite.session);
 const outbox = new SqliteOutboxRepository(sqlite.session);
 const clientRepository = new SqliteClientRepository(sqlite.session, idGenerator);
+const planRepository = new SqlitePlanRepository(sqlite.session);
+const planReader = new SqlitePlanReader(sqlite.session);
 const serviceRepository = new SqliteServiceRepository(sqlite.session);
 const provisioningRepository = new SqliteProvisioningOperationRepository(sqlite.session);
 const provisioningRetryPolicy = new ExponentialRetryPolicy(3);
@@ -122,6 +131,26 @@ const billingController = new BillingController({
   ),
 });
 const billingRouter = createBillingRouter(billingController);
+const plansController = new PlansController({
+  createPlan: new CreatePlan(
+    planRepository,
+    companyContext,
+    idGenerator,
+    clock,
+    outbox,
+    unitOfWork,
+  ),
+  listPlans: new ListPlans(planReader, companyContext),
+  revisePlan: new RevisePlan(
+    planRepository,
+    companyContext,
+    idGenerator,
+    clock,
+    outbox,
+    unitOfWork,
+  ),
+});
+const plansRouter = createPlansRouter(plansController);
 const servicesController = new ServicesController({
   createService: new CreateService(
     serviceRepository,
@@ -153,7 +182,7 @@ const provisioningController = new ProvisioningController({
 });
 const provisioningRouter = createProvisioningRouter(provisioningController);
 const server = createServer(
-  createApp({ billingRouter, clientsRouter, provisioningRouter, servicesRouter }),
+  createApp({ billingRouter, clientsRouter, plansRouter, provisioningRouter, servicesRouter }),
 );
 
 let isShuttingDown = false;
