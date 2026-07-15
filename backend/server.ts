@@ -182,7 +182,13 @@ const provisioningController = new ProvisioningController({
 });
 const provisioningRouter = createProvisioningRouter(provisioningController);
 const server = createServer(
-  createApp({ billingRouter, clientsRouter, plansRouter, provisioningRouter, servicesRouter }),
+  createApp(
+    { billingRouter, clientsRouter, plansRouter, provisioningRouter, servicesRouter },
+    {
+      apiPrefix: environment.API_PREFIX,
+      corsAllowedOrigins: environment.CORS_ALLOWED_ORIGINS,
+    },
+  ),
 );
 
 let isShuttingDown = false;

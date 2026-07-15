@@ -72,7 +72,7 @@ describe('Billing API integration', () => {
   });
   function postPayment() {
     return request(app)
-      .post('/pagos')
+      .post('/api/v1/pagos')
       .set('Idempotency-Key', 'record-payment-0001')
       .set('X-Correlation-Id', correlationId)
       .send({
@@ -95,10 +95,10 @@ describe('Billing API integration', () => {
       receivedAt: '2026-07-11T14:30:00.000Z',
       status: 'recorded',
     });
-    const page = await request(app).get('/pagos').expect(200);
+    const page = await request(app).get('/api/v1/pagos').expect(200);
     expect(page.body).toMatchObject({ page: 1, pageSize: 20, total: 1 });
     expect(page.body.data).toEqual([created.body]);
-    const summary = await request(app).get(`/clientes/${clientId}/cuenta`).expect(200);
+    const summary = await request(app).get(`/api/v1/clientes/${clientId}/cuenta`).expect(200);
     expect(summary.body).toEqual({
       clientId,
       creditCents: 10000,
@@ -121,7 +121,7 @@ describe('Billing API integration', () => {
   });
   it('usa errores globales y no monta rutas no publicadas', async () => {
     await request(app)
-      .post('/pagos')
+      .post('/api/v1/pagos')
       .set('Idempotency-Key', 'record-payment-0001')
       .send({
         amountCents: 10000,
@@ -131,7 +131,7 @@ describe('Billing API integration', () => {
         receivedAt: '2026-07-11T14:30:00.000Z',
       })
       .expect(409);
-    await request(app).get('/facturas').expect(404);
-    await request(app).get('/estados-de-cuenta').expect(404);
+    await request(app).get('/api/v1/facturas').expect(404);
+    await request(app).get('/api/v1/estados-de-cuenta').expect(404);
   });
 });

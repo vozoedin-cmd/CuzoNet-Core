@@ -57,7 +57,7 @@ describe('Services API integration', () => {
 
   function createService() {
     return request(app)
-      .post(`/clientes/${clientId}/servicios`)
+      .post(`/api/v1/clientes/${clientId}/servicios`)
       .set('Idempotency-Key', 'create-service-0001')
       .set('X-Correlation-Id', correlationId)
       .send({ billingDay: 15, planVersionId, serviceType: 'simple_queue' });
@@ -79,12 +79,12 @@ describe('Services API integration', () => {
     expect(createResponse.body).not.toHaveProperty('routerId');
 
     await request(app)
-      .get(`/servicios/${createResponse.body.id}`)
+      .get(`/api/v1/servicios/${createResponse.body.id}`)
       .expect(200)
       .expect((response) => expect(response.body).toEqual(createResponse.body));
 
     await request(app)
-      .get(`/clientes/${clientId}/servicios`)
+      .get(`/api/v1/clientes/${clientId}/servicios`)
       .expect(200)
       .expect((response) => expect(response.body).toEqual([createResponse.body]));
   });
@@ -103,7 +103,7 @@ describe('Services API integration', () => {
 
   it('rechaza campos técnicos de Provisioning con 422', async () => {
     const response = await request(app)
-      .post(`/clientes/${clientId}/servicios`)
+      .post(`/api/v1/clientes/${clientId}/servicios`)
       .set('Idempotency-Key', 'create-service-0001')
       .set('X-Correlation-Id', correlationId)
       .send({
@@ -122,7 +122,7 @@ describe('Services API integration', () => {
 
   it('no monta la operación de Provisioning ni genera operationId artificial', async () => {
     const response = await request(app)
-      .post('/servicios/01890f2e-7b2a-7cc0-8b9a-7e6b4f3a2c20/operaciones')
+      .post('/api/v1/servicios/01890f2e-7b2a-7cc0-8b9a-7e6b4f3a2c20/operaciones')
       .set('Idempotency-Key', 'provision-service-0001')
       .send({
         routerId: '01890f2e-7b2a-7cc0-8b9a-7e6b4f3a2c30',

@@ -24,6 +24,9 @@ const applicationErrorStatusCodes: Readonly<Record<string, number>> = {
   BILLING_CONFLICT: 409,
   CLIENT_CANNOT_RECEIVE_SERVICE: 409,
   CLIENT_DOCUMENT_CONFLICT: 409,
+  CORS_HEADERS_NOT_ALLOWED: 403,
+  CORS_METHOD_NOT_ALLOWED: 403,
+  CORS_ORIGIN_NOT_ALLOWED: 403,
   INVALID_CLIENT_DATA: 422,
   INVALID_BILLING_DATA: 422,
   INVALID_SERVICE_DATA: 422,
@@ -44,6 +47,24 @@ const internalServerError: HttpError = {
 };
 
 export function toHttpError(error: unknown): HttpError {
+  if (error !== null && typeof error === 'object' && 'type' in error) {
+    if (error.type === 'entity.too.large') {
+      return {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'El cuerpo JSON excede el límite permitido.',
+        statusCode: 413,
+      };
+    }
+
+    if (error.type === 'entity.parse.failed') {
+      return {
+        code: 'INVALID_JSON',
+        message: 'El cuerpo de la solicitud no contiene JSON válido.',
+        statusCode: 400,
+      };
+    }
+  }
+
   if (error instanceof ApplicationError) {
     const statusCode = applicationErrorStatusCodes[error.code];
 

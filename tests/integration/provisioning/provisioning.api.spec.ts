@@ -68,7 +68,7 @@ describe('Provisioning API integration', () => {
 
   it('crea con 202 y consulta la operación mediante los contratos OpenAPI', async () => {
     const accepted = await request(app)
-      .post(`/servicios/${serviceId}/operaciones`)
+      .post(`/api/v1/servicios/${serviceId}/operaciones`)
       .set('Idempotency-Key', 'provision-service-0001')
       .set('X-Correlation-Id', correlationId)
       .send({ type: 'provision', routerId })
@@ -80,7 +80,7 @@ describe('Provisioning API integration', () => {
     });
     expect(accepted.body.operationId.slice(14, 15)).toBe('7');
     const fetched = await request(app)
-      .get(`/operaciones/${accepted.body.operationId}`)
+      .get(`/api/v1/operaciones/${accepted.body.operationId}`)
       .set('X-Correlation-Id', correlationId)
       .expect(200);
     expect(fetched.body).toEqual({
@@ -98,7 +98,7 @@ describe('Provisioning API integration', () => {
   it('propaga idempotencia sin crear otro operationId', async () => {
     const call = () =>
       request(app)
-        .post(`/servicios/${serviceId}/operaciones`)
+        .post(`/api/v1/servicios/${serviceId}/operaciones`)
         .set('Idempotency-Key', 'provision-service-0001')
         .set('X-Correlation-Id', correlationId)
         .send({ type: 'provision', routerId });
@@ -109,11 +109,13 @@ describe('Provisioning API integration', () => {
 
   it('traduce validación, ausencia y rutas no oficiales con el manejador global', async () => {
     await request(app)
-      .post(`/servicios/${serviceId}/operaciones`)
+      .post(`/api/v1/servicios/${serviceId}/operaciones`)
       .set('Idempotency-Key', 'provision-service-0001')
       .send({ type: 'provision', routerId: 'invalid' })
       .expect(422);
-    await request(app).get('/operaciones/01890f2e-7b2a-7cc0-8b9a-7e6b4f3a2c99').expect(404);
-    await request(app).post('/provisioning/run').send({}).expect(404);
+    await request(app)
+      .get('/api/v1/operaciones/01890f2e-7b2a-7cc0-8b9a-7e6b4f3a2c99')
+      .expect(404);
+    await request(app).post('/api/v1/provisioning/run').send({}).expect(404);
   });
 });

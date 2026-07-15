@@ -32,7 +32,7 @@ describe('Plans API integration', () => {
 
   it('crea, lista y revisa un plan simple_queue', async () => {
     const created = await request(app)
-      .post('/planes')
+      .post('/api/v1/planes')
       .set('Idempotency-Key', 'create-plan-0001')
       .set('X-Correlation-Id', correlationId)
       .send({
@@ -49,7 +49,7 @@ describe('Plans API integration', () => {
     expect(created.body.currentVersion.id.slice(14, 15)).toBe('7');
 
     const revised = await request(app)
-      .put(`/planes/${created.body.id}`)
+      .put(`/api/v1/planes/${created.body.id}`)
       .set('Idempotency-Key', 'revise-plan-0001')
       .set('X-Correlation-Id', correlationId)
       .send({
@@ -66,14 +66,14 @@ describe('Plans API integration', () => {
       version: 2,
     });
     await request(app)
-      .get('/planes')
+      .get('/api/v1/planes')
       .expect(200)
       .expect((response) => expect(response.body).toEqual([revised.body]));
   });
 
   it('reconoce tipos futuros pero informa que aun no estan soportados', async () => {
     const response = await request(app)
-      .post('/planes')
+      .post('/api/v1/planes')
       .set('Idempotency-Key', 'create-plan-0002')
       .set('X-Correlation-Id', correlationId)
       .send({

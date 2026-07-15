@@ -63,7 +63,7 @@ describe('Clients API integration', () => {
 
   it('ejecuta Create, Get, Update, List y Archive mediante las rutas contractuales', async () => {
     const createResponse = await request(app)
-      .post('/clientes')
+      .post('/api/v1/clientes')
       .set('Idempotency-Key', 'create-client-0001')
       .set('X-Correlation-Id', correlationId)
       .send(validClient)
@@ -83,19 +83,19 @@ describe('Clients API integration', () => {
     expect(createResponse.body.id.slice(14, 15)).toBe('7');
 
     await request(app)
-      .get(`/clientes/${createResponse.body.id}`)
+      .get(`/api/v1/clientes/${createResponse.body.id}`)
       .expect(200)
       .expect((response) => expect(response.body.legalName).toBe('Ana López'));
 
     await request(app)
-      .put(`/clientes/${createResponse.body.id}`)
+      .put(`/api/v1/clientes/${createResponse.body.id}`)
       .set('Idempotency-Key', 'update-client-0001')
       .send({ legalName: 'Ana López Pérez' })
       .expect(200)
       .expect((response) => expect(response.body.legalName).toBe('Ana López Pérez'));
 
     await request(app)
-      .get('/clientes?page=1&pageSize=25&search=pérez')
+      .get('/api/v1/clientes?page=1&pageSize=25&search=pérez')
       .expect(200)
       .expect((response) => {
         expect(response.body).toMatchObject({ page: 1, pageSize: 25, total: 1 });
@@ -103,25 +103,25 @@ describe('Clients API integration', () => {
       });
 
     await request(app)
-      .delete(`/clientes/${createResponse.body.id}`)
+      .delete(`/api/v1/clientes/${createResponse.body.id}`)
       .set('Idempotency-Key', 'archive-client-0001')
       .expect(204);
 
     await request(app)
-      .get(`/clientes/${createResponse.body.id}`)
+      .get(`/api/v1/clientes/${createResponse.body.id}`)
       .expect(200)
       .expect((response) => expect(response.body.status).toBe('archived'));
   });
 
   it('devuelve 409 mediante el manejador global para documento duplicado', async () => {
     await request(app)
-      .post('/clientes')
+      .post('/api/v1/clientes')
       .set('Idempotency-Key', 'create-client-0001')
       .send(validClient)
       .expect(201);
 
     const response = await request(app)
-      .post('/clientes')
+      .post('/api/v1/clientes')
       .set('Idempotency-Key', 'create-client-0002')
       .set('X-Correlation-Id', correlationId)
       .send({ ...validClient, legalName: 'Otra persona' })
@@ -136,7 +136,7 @@ describe('Clients API integration', () => {
 
   it('devuelve ValidationProblem 422 sin exponer detalles internos', async () => {
     const response = await request(app)
-      .post('/clientes')
+      .post('/api/v1/clientes')
       .set('Idempotency-Key', 'create-client-0001')
       .set('X-Correlation-Id', correlationId)
       .send({ ...validClient, legalName: 'A' })
