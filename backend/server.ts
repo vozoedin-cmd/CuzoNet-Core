@@ -53,10 +53,14 @@ import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equ
 import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
 import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
 import { EnvironmentMonitoringCredentialProvider } from './infrastructure/monitoring/environment-monitoring-credential.provider.js';
+import { EnvironmentRouterOsCredentialProvider } from './infrastructure/monitoring/environment-routeros-credential.provider.js';
 import { InventoryMonitoringTargetResolver } from './infrastructure/monitoring/inventory-monitoring-target-resolver.js';
 import { PingCollector } from './infrastructure/monitoring/ping.collector.js';
+import { RouterOsCollector } from './infrastructure/monitoring/routeros.collector.js';
 import { SnmpCollector } from './infrastructure/monitoring/snmp.collector.js';
+import { SourcePriorityObservationPolicy } from './infrastructure/monitoring/source-priority-observation.policy.js';
 import { SystemPingProbe } from './infrastructure/monitoring/system-ping.probe.js';
+import { SystemRouterOsClient } from './infrastructure/monitoring/system-routeros.client.js';
 import { SystemSnmpProbe } from './infrastructure/monitoring/system-snmp.probe.js';
 import { SqliteInventoryReaderAdapter } from './infrastructure/monitoring/sqlite-inventory-reader.adapter.js';
 import { SqliteNetworkReaderAdapter } from './infrastructure/monitoring/sqlite-network-reader.adapter.js';
@@ -185,15 +189,33 @@ const snmpCollector = new SnmpCollector(
   },
   { clock },
 );
+const routerOsCredentialProvider = new EnvironmentRouterOsCredentialProvider({
+  host: environment.MONITORING_ROUTEROS_HOST,
+  password: environment.MONITORING_ROUTEROS_PASSWORD,
+  port: environment.MONITORING_ROUTEROS_PORT,
+  timeoutMs: environment.MONITORING_ROUTEROS_TIMEOUT_MS,
+  tls: environment.MONITORING_ROUTEROS_TLS,
+  username: environment.MONITORING_ROUTEROS_USERNAME,
+});
+const routerOsCollector = new RouterOsCollector(
+  {
+    client: new SystemRouterOsClient(),
+    credentialProvider: routerOsCredentialProvider,
+    idGenerator,
+  },
+  { clock },
+);
 
 const monitoringWorker = new MonitoringWorker({
   collectors: new CollectorRegistry([
     pingCollector,
     snmpCollector,
+    routerOsCollector,
     new NoOpCollector(),
   ]),
   inventory: monitoringInventoryReader,
   recordObservations: recordObservationBatch,
+  observationPriorityPolicy: new SourcePriorityObservationPolicy(),
 }, { clock });
 const monitoringWorkerHost = new WorkerHost(
   [monitoringWorker],

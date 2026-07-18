@@ -1,5 +1,6 @@
 import type { InventoryEquipmentReference, InventoryReader } from '../../application/ports/monitoring/inventory.reader.js';
 import type { Clock } from '../../application/ports/clock.port.js';
+import type { ObservationPriorityPolicy } from '../../application/ports/monitoring/observation-priority-policy.port.js';
 import type { RecordObservationCommand, RecordObservationBatchUseCase } from '../../application/use-cases/monitoring/record-observation-batch.usecase.js';
 import type { Observation } from '../../domain/monitoring/observation.js';
 import type { CollectorRegistry } from '../monitoring/collector-registry.js';
@@ -9,12 +10,16 @@ import { WorkerRole } from './worker-role.js';
 const monitoringCycleWorkId = 'monitoring-collection-cycle';
 const defaultClock: Clock = { now: () => new Date() };
 const defaultIntervalMs = 60_000;
+const preserveAllObservationPriorityPolicy: ObservationPriorityPolicy = {
+  select: (observations) => [...observations],
+};
 
 type ObservationBatchRecorder = Pick<RecordObservationBatchUseCase, 'execute'>;
 
 export interface MonitoringWorkerDependencies {
   collectors: CollectorRegistry;
   inventory: InventoryReader;
+  observationPriorityPolicy?: ObservationPriorityPolicy;
   recordObservations: ObservationBatchRecorder;
 }
 
@@ -27,6 +32,7 @@ export class MonitoringWorker implements WorkerRoleHandler {
   public readonly role = WorkerRole.Monitoring;
   private readonly clock: Clock;
   private readonly intervalMs: number;
+  private readonly observationPriorityPolicy: ObservationPriorityPolicy;
   private nextRunAt = 0;
 
   public constructor(
@@ -35,6 +41,8 @@ export class MonitoringWorker implements WorkerRoleHandler {
   ) {
     this.clock = options.clock ?? defaultClock;
     this.intervalMs = options.intervalMs ?? defaultIntervalMs;
+    this.observationPriorityPolicy =
+      dependencies.observationPriorityPolicy ?? preserveAllObservationPriorityPolicy;
     if (!Number.isInteger(this.intervalMs) || this.intervalMs < 1) {
       throw new RangeError('intervalMs debe ser un entero mayor que cero.');
     }
@@ -59,18 +67,21 @@ export class MonitoringWorker implements WorkerRoleHandler {
 
     for (const item of equipment) {
       if (signal.aborted) throw signal.reason;
+      const itemObservations: Observation[] = [];
       const collectors = this.dependencies.collectors.findAllFor(item);
       for (const collector of collectors) {
         try {
           const observations = await collector.collect(item);
           this.assertObservationsBelongToEquipment(item, observations);
-          const companyObservations = observationsByCompany.get(item.companyId) ?? [];
-          companyObservations.push(...observations);
-          observationsByCompany.set(item.companyId, companyObservations);
+          itemObservations.push(...observations);
         } catch (error) {
           errors.push(`${item.id}: ${this.errorMessage(error)}`);
         }
       }
+      const selected = this.observationPriorityPolicy.select(itemObservations);
+      const companyObservations = observationsByCompany.get(item.companyId) ?? [];
+      companyObservations.push(...selected);
+      observationsByCompany.set(item.companyId, companyObservations);
     }
 
     let recordedObservations = 0;

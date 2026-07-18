@@ -16,6 +16,10 @@ const timeZoneSchema = z
     }
   });
 
+const booleanStringSchema = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
+
 const environmentSchema = z.object({
   API_PREFIX: z
     .string()
@@ -32,6 +36,12 @@ const environmentSchema = z.object({
   DATABASE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
   DATABASE_BACKUP_PATH: z.string().trim().min(1).default('./storage/backups'),
   MONITORING_PING_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(3_000),
+  MONITORING_ROUTEROS_HOST: z.string().trim().min(1).optional(),
+  MONITORING_ROUTEROS_PASSWORD: z.string().optional(),
+  MONITORING_ROUTEROS_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+  MONITORING_ROUTEROS_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  MONITORING_ROUTEROS_TLS: booleanStringSchema.default(true),
+  MONITORING_ROUTEROS_USERNAME: z.string().trim().min(1).optional(),
   MONITORING_SNMP_COMMUNITY: z.string().trim().min(1).optional(),
   MONITORING_SNMP_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
   MONITORING_SNMP_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(3_000),
@@ -50,6 +60,12 @@ const parsedEnvironment = environmentSchema.safeParse({
   DATABASE_BACKUP_PATH: process.env.DATABASE_BACKUP_PATH,
   MONITORING_PING_TIMEOUT_MS: process.env.MONITORING_PING_TIMEOUT_MS,
   MONITORING_SNMP_COMMUNITY: process.env.MONITORING_SNMP_COMMUNITY,
+  MONITORING_ROUTEROS_HOST: process.env.MONITORING_ROUTEROS_HOST,
+  MONITORING_ROUTEROS_PASSWORD: process.env.MONITORING_ROUTEROS_PASSWORD,
+  MONITORING_ROUTEROS_PORT: process.env.MONITORING_ROUTEROS_PORT,
+  MONITORING_ROUTEROS_TIMEOUT_MS: process.env.MONITORING_ROUTEROS_TIMEOUT_MS,
+  MONITORING_ROUTEROS_TLS: process.env.MONITORING_ROUTEROS_TLS,
+  MONITORING_ROUTEROS_USERNAME: process.env.MONITORING_ROUTEROS_USERNAME,
   MONITORING_SNMP_RETRIES: process.env.MONITORING_SNMP_RETRIES,
   MONITORING_SNMP_TIMEOUT_MS: process.env.MONITORING_SNMP_TIMEOUT_MS,
 });
