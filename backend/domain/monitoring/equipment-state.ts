@@ -23,7 +23,7 @@ export class EquipmentState {
       return;
     }
 
-        let hasPing = false;
+    let hasPing = false;
     let hasPacketLoss = false;
     let maxPacketLoss = 0;
 
@@ -35,7 +35,7 @@ export class EquipmentState {
 
       if (obs.props.metricType === 'ping_latency' && obs.props.metricValue.unit === 'ms') {
         this.props.lastLatencyMs = obs.props.metricValue.value;
-                hasPing = true;
+        hasPing = true;
       }
 
       if (obs.props.metricType === 'uptime' && obs.props.metricValue.unit === 'seconds') {
@@ -50,13 +50,12 @@ export class EquipmentState {
       }
     }
 
-    // Basic state derivation
-    if (hasPing) {
-      if (hasPacketLoss && maxPacketLoss > 20) {
-        this.props.status = 'DEGRADED';
-      } else {
-        this.props.status = 'UP';
-      }
+    if (hasPacketLoss && maxPacketLoss >= 100) {
+      this.props.status = 'DOWN';
+    } else if (hasPing && hasPacketLoss && maxPacketLoss > 20) {
+      this.props.status = 'DEGRADED';
+    } else if (hasPing) {
+      this.props.status = 'UP';
     }
   }
 

@@ -2,16 +2,19 @@ import 'dotenv/config';
 
 import { z } from 'zod';
 
-const timeZoneSchema = z.string().min(1).superRefine((timeZone, context) => {
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone });
-  } catch {
-    context.addIssue({
-      code: 'custom',
-      message: 'Debe ser una zona horaria IANA válida.',
-    });
-  }
-});
+const timeZoneSchema = z
+  .string()
+  .min(1)
+  .superRefine((timeZone, context) => {
+    try {
+      Intl.DateTimeFormat('en-US', { timeZone });
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'Debe ser una zona horaria IANA válida.',
+      });
+    }
+  });
 
 const environmentSchema = z.object({
   API_PREFIX: z
@@ -28,6 +31,7 @@ const environmentSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).default('./storage/cuzonet.sqlite'),
   DATABASE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
   DATABASE_BACKUP_PATH: z.string().trim().min(1).default('./storage/backups'),
+  MONITORING_PING_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(3_000),
 });
 
 const parsedEnvironment = environmentSchema.safeParse({
@@ -41,6 +45,7 @@ const parsedEnvironment = environmentSchema.safeParse({
   DATABASE_PATH: process.env.DATABASE_PATH,
   DATABASE_BUSY_TIMEOUT_MS: process.env.DATABASE_BUSY_TIMEOUT_MS,
   DATABASE_BACKUP_PATH: process.env.DATABASE_BACKUP_PATH,
+  MONITORING_PING_TIMEOUT_MS: process.env.MONITORING_PING_TIMEOUT_MS,
 });
 
 if (!parsedEnvironment.success) {

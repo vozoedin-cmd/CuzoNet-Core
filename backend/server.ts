@@ -52,6 +52,9 @@ import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashbo
 import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equipment.repository.js';
 import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
 import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
+import { InventoryMonitoringTargetResolver } from './infrastructure/monitoring/inventory-monitoring-target-resolver.js';
+import { PingCollector } from './infrastructure/monitoring/ping.collector.js';
+import { SystemPingProbe } from './infrastructure/monitoring/system-ping.probe.js';
 import { SqliteInventoryReaderAdapter } from './infrastructure/monitoring/sqlite-inventory-reader.adapter.js';
 import { SqliteNetworkReaderAdapter } from './infrastructure/monitoring/sqlite-network-reader.adapter.js';
 import { SqliteObservationRepository } from './infrastructure/monitoring/sqlite-observation.repository.js';
@@ -155,8 +158,18 @@ const monitoringController = new MonitoringController(
   ),
 );
 const monitoringRouter = createMonitoringRouter(monitoringController);
+const monitoringTargetResolver = new InventoryMonitoringTargetResolver();
+const pingProbe = new SystemPingProbe();
+const pingCollector = new PingCollector(
+  {
+    idGenerator,
+    probe: pingProbe,
+    targetResolver: monitoringTargetResolver,
+  },
+  { clock, timeoutMs: environment.MONITORING_PING_TIMEOUT_MS },
+);
 const monitoringWorker = new MonitoringWorker({
-  collectors: new CollectorRegistry([new NoOpCollector()]),
+  collectors: new CollectorRegistry([pingCollector, new NoOpCollector()]),
   inventory: monitoringInventoryReader,
   recordObservations: recordObservationBatch,
 }, { clock });
