@@ -13,7 +13,7 @@ interface WorkLeaseRow {
   fencing_token: number;
   owner_id: string;
   renewed_at: string;
-  role: 'automation' | 'outbox' | 'provisioning';
+  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
   work_id: string;
 }
 

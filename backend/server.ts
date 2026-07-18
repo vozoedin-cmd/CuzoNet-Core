@@ -8,6 +8,8 @@ import { DashboardController } from './api/dashboard/dashboard.controller.js';
 import { createDashboardRouter } from './api/dashboard/dashboard.routes.js';
 import { EquipmentController } from './api/inventory/equipment.controller.js';
 import { createEquipmentRouter } from './api/inventory/equipment.routes.js';
+import { MonitoringController } from './api/monitoring/monitoring.controller.js';
+import { createMonitoringRouter } from './api/monitoring/monitoring.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
 import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
@@ -18,6 +20,10 @@ import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { GetBillingSummaryQuery } from './application/queries/dashboard/get-billing-summary.query.js';
 import { GetDashboardOverviewQuery } from './application/queries/dashboard/get-dashboard-overview.query.js';
 import { GetNetworkHealthQuery } from './application/queries/dashboard/get-network-health.query.js';
+import { GetLatestStateUseCase } from './application/use-cases/monitoring/get-latest-state.usecase.js';
+import { GetTimeSeriesUseCase } from './application/use-cases/monitoring/get-time-series.usecase.js';
+import { GetTopologyStateUseCase } from './application/use-cases/monitoring/get-topology-state.usecase.js';
+import { RecordObservationBatchUseCase } from './application/use-cases/monitoring/record-observation-batch.usecase.js';
 import { CreateEquipmentUseCase } from './application/inventory/create-equipment.usecase.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
 import { CreateClient } from './application/use-cases/clients/create-client/create-client.use-case.js';
@@ -43,6 +49,12 @@ import { environment } from './infrastructure/config/environment.js';
 import { InMemoryDashboardCache } from './infrastructure/dashboard/in-memory-dashboard.cache.js';
 import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashboard.readers.js';
 import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equipment.repository.js';
+import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
+import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
+import { SqliteInventoryReaderAdapter } from './infrastructure/monitoring/sqlite-inventory-reader.adapter.js';
+import { SqliteNetworkReaderAdapter } from './infrastructure/monitoring/sqlite-network-reader.adapter.js';
+import { SqliteObservationRepository } from './infrastructure/monitoring/sqlite-observation.repository.js';
+import { NoOpCollector } from './infrastructure/monitoring/no-op.collector.js';
 import { SqliteClientRepository } from './infrastructure/database/clients/sqlite/sqlite-client-repository.js';
 import { SqlitePlanRepository } from './infrastructure/database/plans/sqlite/sqlite-plan-repository.js';
 import { SqlitePlanReader } from './infrastructure/plans/readers/sqlite-plan-reader.js';
@@ -63,6 +75,10 @@ import { logger } from './infrastructure/logging/logger.js';
 import { ExponentialRetryPolicy } from './infrastructure/provisioning/retry/exponential-retry-policy.js';
 import { ServiceReaderProvisioningAdapter } from './infrastructure/provisioning/services/service-reader-provisioning.adapter.js';
 import { SqliteSingleCompanyContext } from './infrastructure/tenancy/sqlite-single-company-context.js';
+import { MonitoringWorker } from './infrastructure/workers/monitoring-worker.js';
+import { SqliteWorkLeaseRepository } from './infrastructure/workers/sqlite/sqlite-work-lease-repository.js';
+import { SqliteWorkerStatisticsRepository } from './infrastructure/workers/sqlite/sqlite-worker-statistics-repository.js';
+import { WorkerHost } from './infrastructure/workers/worker-host.js';
 
 const shutdownTimeoutMs = 10_000;
 const idGenerator = new UuidV7IdGenerator();
@@ -118,6 +134,36 @@ const equipmentController = new EquipmentController(
   new CreateEquipmentUseCase(equipmentRepository, idGenerator),
 );
 const equipmentRouter = createEquipmentRouter(equipmentController);
+const observationRepository = new SqliteObservationRepository(sqlite.connection);
+const equipmentStateRepository = new SqliteEquipmentStateRepository(sqlite.connection);
+const monitoringInventoryReader = new SqliteInventoryReaderAdapter(sqlite.connection);
+const recordObservationBatch = new RecordObservationBatchUseCase(
+  observationRepository,
+  equipmentStateRepository,
+  monitoringInventoryReader,
+  idGenerator,
+);
+const monitoringController = new MonitoringController(
+  recordObservationBatch,
+  new GetLatestStateUseCase(equipmentStateRepository, monitoringInventoryReader),
+  new GetTimeSeriesUseCase(observationRepository, monitoringInventoryReader),
+  new GetTopologyStateUseCase(
+    equipmentStateRepository,
+    new SqliteNetworkReaderAdapter(sqlite.connection),
+  ),
+);
+const monitoringRouter = createMonitoringRouter(monitoringController);
+const monitoringWorker = new MonitoringWorker({
+  collectors: new CollectorRegistry([new NoOpCollector()]),
+  inventory: monitoringInventoryReader,
+  recordObservations: recordObservationBatch,
+}, { clock });
+const monitoringWorkerHost = new WorkerHost(
+  [monitoringWorker],
+  new SqliteWorkLeaseRepository(sqlite.session),
+  new SqliteWorkerStatisticsRepository(sqlite.session),
+  `monitoring-${process.pid}`,
+);
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
   createClient: new CreateClient(
@@ -219,6 +265,7 @@ const server = createServer(
       clientsRouter,
       dashboardRouter,
       equipmentRouter,
+      monitoringRouter,
       plansRouter,
       provisioningRouter,
       servicesRouter,
@@ -261,6 +308,7 @@ function shutdown(signal: NodeJS.Signals): void {
     }
 
     try {
+      await monitoringWorkerHost.stop();
       await sqlite.close();
       logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
       process.exit(0);

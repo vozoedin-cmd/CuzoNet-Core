@@ -309,7 +309,7 @@ export interface WorkLeaseTable {
   fencing_token: number;
   owner_id: string;
   renewed_at: string;
-  role: 'automation' | 'outbox' | 'provisioning';
+  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
   work_id: string;
 }
 
@@ -322,7 +322,7 @@ export interface WorkerStatisticsTable {
   lease_lost_count: number;
   processed_count: number;
   retry_count: number;
-  role: 'automation' | 'outbox' | 'provisioning';
+  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
   skipped_count: number;
   started_at: string;
   stopped_at: Nullable<string>;
