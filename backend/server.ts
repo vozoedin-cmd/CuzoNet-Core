@@ -52,9 +52,12 @@ import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashbo
 import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equipment.repository.js';
 import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
 import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
+import { EnvironmentMonitoringCredentialProvider } from './infrastructure/monitoring/environment-monitoring-credential.provider.js';
 import { InventoryMonitoringTargetResolver } from './infrastructure/monitoring/inventory-monitoring-target-resolver.js';
 import { PingCollector } from './infrastructure/monitoring/ping.collector.js';
+import { SnmpCollector } from './infrastructure/monitoring/snmp.collector.js';
 import { SystemPingProbe } from './infrastructure/monitoring/system-ping.probe.js';
+import { SystemSnmpProbe } from './infrastructure/monitoring/system-snmp.probe.js';
 import { SqliteInventoryReaderAdapter } from './infrastructure/monitoring/sqlite-inventory-reader.adapter.js';
 import { SqliteNetworkReaderAdapter } from './infrastructure/monitoring/sqlite-network-reader.adapter.js';
 import { SqliteObservationRepository } from './infrastructure/monitoring/sqlite-observation.repository.js';
@@ -168,8 +171,27 @@ const pingCollector = new PingCollector(
   },
   { clock, timeoutMs: environment.MONITORING_PING_TIMEOUT_MS },
 );
+const monitoringCredentialProvider = new EnvironmentMonitoringCredentialProvider({
+  community: environment.MONITORING_SNMP_COMMUNITY,
+  retries: environment.MONITORING_SNMP_RETRIES,
+  timeoutMs: environment.MONITORING_SNMP_TIMEOUT_MS,
+});
+const snmpCollector = new SnmpCollector(
+  {
+    credentialProvider: monitoringCredentialProvider,
+    idGenerator,
+    probe: new SystemSnmpProbe(),
+    targetResolver: monitoringTargetResolver,
+  },
+  { clock },
+);
+
 const monitoringWorker = new MonitoringWorker({
-  collectors: new CollectorRegistry([pingCollector, new NoOpCollector()]),
+  collectors: new CollectorRegistry([
+    pingCollector,
+    snmpCollector,
+    new NoOpCollector(),
+  ]),
   inventory: monitoringInventoryReader,
   recordObservations: recordObservationBatch,
 }, { clock });

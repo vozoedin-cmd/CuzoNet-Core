@@ -3,6 +3,8 @@ import type { MonitoringCollector } from '../../application/ports/monitoring/mon
 import type { Observation } from '../../domain/monitoring/observation.js';
 
 export class NoOpCollector implements MonitoringCollector {
+  public readonly fallback = true;
+
   public supports(_equipment: InventoryEquipmentReference): boolean {
     return true;
   }

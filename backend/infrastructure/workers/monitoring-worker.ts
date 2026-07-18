@@ -59,16 +59,17 @@ export class MonitoringWorker implements WorkerRoleHandler {
 
     for (const item of equipment) {
       if (signal.aborted) throw signal.reason;
-      try {
-        const collector = this.dependencies.collectors.findFor(item);
-        if (collector === null) continue;
-        const observations = await collector.collect(item);
-        this.assertObservationsBelongToEquipment(item, observations);
-        const companyObservations = observationsByCompany.get(item.companyId) ?? [];
-        companyObservations.push(...observations);
-        observationsByCompany.set(item.companyId, companyObservations);
-      } catch (error) {
-        errors.push(`${item.id}: ${this.errorMessage(error)}`);
+      const collectors = this.dependencies.collectors.findAllFor(item);
+      for (const collector of collectors) {
+        try {
+          const observations = await collector.collect(item);
+          this.assertObservationsBelongToEquipment(item, observations);
+          const companyObservations = observationsByCompany.get(item.companyId) ?? [];
+          companyObservations.push(...observations);
+          observationsByCompany.set(item.companyId, companyObservations);
+        } catch (error) {
+          errors.push(`${item.id}: ${this.errorMessage(error)}`);
+        }
       }
     }
 

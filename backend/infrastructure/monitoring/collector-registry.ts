@@ -16,4 +16,10 @@ export class CollectorRegistry {
   public findFor(equipment: InventoryEquipmentReference): MonitoringCollector | null {
     return this.collectors.find((collector) => collector.supports(equipment)) ?? null;
   }
+
+  public findAllFor(equipment: InventoryEquipmentReference): MonitoringCollector[] {
+    const supported = this.collectors.filter((collector) => collector.supports(equipment));
+    const activeCollectors = supported.filter((collector) => collector.fallback !== true);
+    return activeCollectors.length > 0 ? activeCollectors : supported.slice(0, 1);
+  }
 }
