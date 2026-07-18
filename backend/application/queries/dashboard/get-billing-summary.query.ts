@@ -24,7 +24,7 @@ export class GetBillingSummaryQuery {
     ]);
 
     const total = collectedThisMonthCents + overdueThisMonthCents;
-    const collectionRatePercentage = total > 0 ? Math.round((collectedThisMonthCents / total) * 100) : 100;
+    const collectionRatePercentage = total > 0 ? Math.round((collectedThisMonthCents / total) * 100) : 0;
 
     const result: BillingSummaryDto = {
       collectedThisMonthCents,

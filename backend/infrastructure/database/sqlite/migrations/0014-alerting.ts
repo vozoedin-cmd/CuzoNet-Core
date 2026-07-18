@@ -1,9 +1,10 @@
+import type { Migration } from '../migration/migration.js';
 
-import type { Database } from 'better-sqlite3';
-
-export function up(db: Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS alert_policies (
+export const alertingMigration: Migration = {
+  name: 'alerting',
+  version: 14,
+  sql: `
+    CREATE TABLE alert_policies (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL,
       name TEXT NOT NULL,
@@ -13,7 +14,7 @@ export function up(db: Database): void {
       is_active INTEGER NOT NULL DEFAULT 1
     );
 
-    CREATE TABLE IF NOT EXISTS alerts (
+    CREATE TABLE alerts (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL,
       policy_id TEXT NOT NULL,
@@ -24,24 +25,16 @@ export function up(db: Database): void {
       triggered_at TEXT NOT NULL,
       resolved_at TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(company_id, status);
-    CREATE INDEX IF NOT EXISTS idx_alerts_entity ON alerts(entity_id, policy_id);
+    CREATE INDEX alerts_status_idx ON alerts(company_id, status);
+    CREATE INDEX alerts_entity_idx ON alerts(entity_id, policy_id);
 
-    CREATE TABLE IF NOT EXISTS alert_history (
+    CREATE TABLE alert_history (
       id TEXT PRIMARY KEY,
       alert_id TEXT NOT NULL,
       status TEXT NOT NULL,
       actor_id TEXT,
       occurred_at TEXT NOT NULL,
-      FOREIGN KEY(alert_id) REFERENCES alerts(id)
+      FOREIGN KEY (alert_id) REFERENCES alerts(id)
     );
-  `);
-}
-
-export function down(db: Database): void {
-  db.exec(`
-    DROP TABLE IF EXISTS alert_history;
-    DROP TABLE IF EXISTS alerts;
-    DROP TABLE IF EXISTS alert_policies;
-  `);
-}
+  `,
+};

@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,7 +27,7 @@ describe('SQLite foundation integration', () => {
     rmSync(directory, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
   });
 
-  it('aplica migraciones de forma idempotente y registra ambas versiones', async () => {
+  it('aplica migraciones de forma idempotente y registra todas las versiones', async () => {
     const runner = new MigrationRunner(database.connection, {
       now: () => new Date('2026-07-12T12:00:00.000Z'),
     });
@@ -45,9 +45,9 @@ describe('SQLite foundation integration', () => {
       )
       .get();
 
-    expect(runner.currentVersion()).toBe(10);
-    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    expect(metadata).toMatchObject({ database_version: 1, schema_version: 10 });
+    expect(runner.currentVersion()).toBe(14);
+    expect(migrations.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14]);
+    expect(metadata).toMatchObject({ database_version: 1, schema_version: 14 });
     expect(expiresIndex).toBeDefined();
   });
 

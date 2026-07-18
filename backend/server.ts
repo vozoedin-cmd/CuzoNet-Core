@@ -1,9 +1,11 @@
-﻿import { createServer } from 'node:http';
+import { createServer } from 'node:http';
 
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { BillingController } from './api/billing/controller/billing.controller.js';
 import { createBillingRouter } from './api/billing/routes/billing.routes.js';
 import { createClientsRouter } from './api/clients/routes/clients.routes.js';
+import { DashboardController } from './api/dashboard/dashboard.controller.js';
+import { createDashboardRouter } from './api/dashboard/dashboard.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
 import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
@@ -11,6 +13,9 @@ import { PlansController } from './api/plans/controller/plans.controller.js';
 import { createPlansRouter } from './api/plans/routes/plans.routes.js';
 import { ServicesController } from './api/services/controller/services.controller.js';
 import { createServicesRouter } from './api/services/routes/services.routes.js';
+import { GetBillingSummaryQuery } from './application/queries/dashboard/get-billing-summary.query.js';
+import { GetDashboardOverviewQuery } from './application/queries/dashboard/get-dashboard-overview.query.js';
+import { GetNetworkHealthQuery } from './application/queries/dashboard/get-network-health.query.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
 import { CreateClient } from './application/use-cases/clients/create-client/create-client.use-case.js';
 import { GetClient } from './application/use-cases/clients/get-client/get-client.use-case.js';
@@ -32,6 +37,8 @@ import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
 import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
 import { environment } from './infrastructure/config/environment.js';
+import { InMemoryDashboardCache } from './infrastructure/dashboard/in-memory-dashboard.cache.js';
+import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashboard.readers.js';
 import { SqliteClientRepository } from './infrastructure/database/clients/sqlite/sqlite-client-repository.js';
 import { SqlitePlanRepository } from './infrastructure/database/plans/sqlite/sqlite-plan-repository.js';
 import { SqlitePlanReader } from './infrastructure/plans/readers/sqlite-plan-reader.js';
@@ -87,6 +94,21 @@ const billingPaymentRepository = new SqlitePaymentRepository(sqlite.session);
 const billingSettings = new SqliteCompanyBillingSettings(sqlite.session);
 const actorContext: ActorContext = { getActorId: () => 'temporary-server-context' };
 const billingActorContext: BillingActorContext = { getActorId: () => 'temporary-server-context' };
+const dashboardReaders = new SqliteDashboardReaders(sqlite.connection, clock);
+const dashboardCache = new InMemoryDashboardCache();
+const dashboardController = new DashboardController({
+  billingSummary: new GetBillingSummaryQuery(dashboardReaders, dashboardCache),
+  companyContext,
+  networkHealth: new GetNetworkHealthQuery(dashboardReaders, dashboardCache),
+  overview: new GetDashboardOverviewQuery(
+    dashboardReaders,
+    dashboardReaders,
+    dashboardReaders,
+    dashboardReaders,
+    dashboardCache,
+  ),
+});
+const dashboardRouter = createDashboardRouter(dashboardController);
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
   createClient: new CreateClient(
@@ -183,7 +205,7 @@ const provisioningController = new ProvisioningController({
 const provisioningRouter = createProvisioningRouter(provisioningController);
 const server = createServer(
   createApp(
-    { billingRouter, clientsRouter, plansRouter, provisioningRouter, servicesRouter },
+    { billingRouter, clientsRouter, dashboardRouter, plansRouter, provisioningRouter, servicesRouter },
     {
       apiPrefix: environment.API_PREFIX,
       corsAllowedOrigins: environment.CORS_ALLOWED_ORIGINS,
