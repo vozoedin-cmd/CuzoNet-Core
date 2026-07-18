@@ -5,6 +5,7 @@ import { EquipmentController } from '../../../backend/api/inventory/equipment.co
 import { createEquipmentRouter } from '../../../backend/api/inventory/equipment.routes.js';
 import { createApp } from '../../../backend/api/http/app.js';
 import { CreateEquipmentUseCase } from '../../../backend/application/inventory/create-equipment.usecase.js';
+import { SetEquipmentManagementHostUseCase } from '../../../backend/application/inventory/set-equipment-management-host.usecase.js';
 import type { Clock } from '../../../backend/application/ports/clock.port.js';
 import { SqliteEquipmentRepository } from '../../../backend/infrastructure/inventory/sqlite-equipment.repository.js';
 import { CompanyBootstrap } from '../../../backend/infrastructure/database/sqlite/bootstrap/company-bootstrap.js';
@@ -36,6 +37,7 @@ describe('Inventory equipment API integration', () => {
     const repository = new SqliteEquipmentRepository(database.connection);
     const controller = new EquipmentController(
       new CreateEquipmentUseCase(repository, idGenerator),
+      new SetEquipmentManagementHostUseCase(repository),
     );
     app = createApp({ equipmentRouter: createEquipmentRouter(controller) });
   });

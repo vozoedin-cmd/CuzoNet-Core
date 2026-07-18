@@ -5,6 +5,7 @@ export interface InventoryEquipmentReference {
   role: string;
   capabilities: Readonly<Record<string, unknown>>;
   status: 'active' | 'inactive' | 'retired';
+  managementHost?: string;
 }
 
 export interface InventoryReader {

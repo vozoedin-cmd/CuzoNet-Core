@@ -5,5 +5,6 @@ import type { EquipmentController } from './equipment.controller.js';
 export function createEquipmentRouter(controller: EquipmentController): Router {
   const router = Router();
   router.post('/equipments', controller.create);
+  router.put('/equipments/:equipmentId/management-host', controller.setManagementHost);
   return router;
 }

@@ -88,7 +88,6 @@ export interface ClientServiceTable {
   started_on: Nullable<string>;
 }
 
-
 export interface PlanTable {
   code: string;
   company_id: string;
@@ -329,6 +328,20 @@ export interface WorkerStatisticsTable {
   worker_id: string;
 }
 
+export interface NetworkAssetTable {
+  acquired_on: string;
+  asset_model_id: Nullable<string>;
+  asset_type: string;
+  capabilities: string;
+  company_id: string;
+  id: string;
+  mac_address: Nullable<string>;
+  management_host: Nullable<string>;
+  role: string;
+  serial_number: Nullable<string>;
+  status: 'active' | 'inactive' | 'retired';
+}
+
 export interface DatabaseSchema {
   automation_executions: AutomationExecutionTable;
   automation_rule_versions: AutomationRuleVersionTable;
@@ -352,6 +365,7 @@ export interface DatabaseSchema {
   plan_versions: PlanVersionTable;
   plans: PlanTable;
   mikrotik_resources: MikrotikResourceTable;
+  network_assets: NetworkAssetTable;
   provisioning_operations: ProvisioningOperationTable;
   schema_migrations: SchemaMigrationTable;
   work_leases: WorkLeaseTable;

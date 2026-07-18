@@ -10,6 +10,7 @@ import { servicesMigration } from '../migrations/0003-services.js';
 import { mikrotikSimpleQueueMigration } from '../migrations/0009-mikrotik-simple-queue.js';
 import { monitoringMigration } from '../migrations/0013-monitoring.js';
 import { monitoringWorkerMigration } from '../migrations/0015-monitoring-worker.js';
+import { equipmentManagementHostMigration } from '../migrations/0016-equipment-management-host.js';
 import { networkMigration } from '../migrations/0012-network.js';
 import { plansMigration } from '../migrations/0010-plans.js';
 import { workersMigration } from '../migrations/0008-workers.js';
@@ -31,4 +32,5 @@ export const migrations: readonly Migration[] = Object.freeze([
   monitoringMigration,
   alertingMigration,
   monitoringWorkerMigration,
+  equipmentManagementHostMigration,
 ]);

@@ -25,6 +25,7 @@ import { GetTimeSeriesUseCase } from './application/use-cases/monitoring/get-tim
 import { GetTopologyStateUseCase } from './application/use-cases/monitoring/get-topology-state.usecase.js';
 import { RecordObservationBatchUseCase } from './application/use-cases/monitoring/record-observation-batch.usecase.js';
 import { CreateEquipmentUseCase } from './application/inventory/create-equipment.usecase.js';
+import { SetEquipmentManagementHostUseCase } from './application/inventory/set-equipment-management-host.usecase.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
 import { CreateClient } from './application/use-cases/clients/create-client/create-client.use-case.js';
 import { GetClient } from './application/use-cases/clients/get-client/get-client.use-case.js';
@@ -132,6 +133,7 @@ const dashboardRouter = createDashboardRouter(dashboardController);
 const equipmentRepository = new SqliteEquipmentRepository(sqlite.connection);
 const equipmentController = new EquipmentController(
   new CreateEquipmentUseCase(equipmentRepository, idGenerator),
+  new SetEquipmentManagementHostUseCase(equipmentRepository),
 );
 const equipmentRouter = createEquipmentRouter(equipmentController);
 const observationRepository = new SqliteObservationRepository(sqlite.connection);
