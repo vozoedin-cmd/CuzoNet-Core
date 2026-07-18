@@ -2,6 +2,7 @@ import { alertingMigration } from '../migrations/0014-alerting.js';
 import { automationMigration } from '../migrations/0007-automation.js';
 import { billingMigration } from '../migrations/0004-billing.js';
 import { clientsMigration } from '../migrations/0002-clients.js';
+import { equipmentMigration } from '../migrations/0011-equipment.js';
 import { foundationMigration } from '../migrations/0001-foundation.js';
 import { outboxIdempotencyMigration } from '../migrations/0006-outbox-idempotency.js';
 import { provisioningMigration } from '../migrations/0005-provisioning.js';
@@ -24,6 +25,7 @@ export const migrations: readonly Migration[] = Object.freeze([
   workersMigration,
   mikrotikSimpleQueueMigration,
   plansMigration,
+  equipmentMigration,
   networkMigration,
   monitoringMigration,
   alertingMigration,

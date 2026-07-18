@@ -1,27 +1,23 @@
-import type { CreateEquipmentUseCase, CreateEquipmentCommand } from '../../application/inventory/create-equipment.usecase.js';
+import type { RequestHandler } from 'express';
 
-export interface HttpRequest {
-  body: Record<string, unknown>;
-}
-
-export interface HttpResponse {
-  status: (code: number) => this;
-  json: (data: unknown) => void;
-}
+import type {
+  CreateEquipmentCommand,
+  CreateEquipmentUseCase,
+} from '../../application/inventory/create-equipment.usecase.js';
 
 export class EquipmentController {
-  constructor(private readonly createEquipmentUseCase: CreateEquipmentUseCase) {}
+  public constructor(private readonly createEquipmentUseCase: CreateEquipmentUseCase) {}
 
-  public async create(req: HttpRequest, res: HttpResponse): Promise<void> {
+  public readonly create: RequestHandler = async (request, response) => {
     try {
-      const id = await this.createEquipmentUseCase.execute(req.body as unknown as CreateEquipmentCommand);
-      res.status(201).json({ id });
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(400).json({ error: 'Unknown error' });
-      }
+      const id = await this.createEquipmentUseCase.execute(
+        request.body as unknown as CreateEquipmentCommand,
+      );
+      response.status(201).json({ id });
+    } catch (error: unknown) {
+      response.status(400).json({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
-  }
+  };
 }

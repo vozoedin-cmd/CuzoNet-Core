@@ -6,6 +6,8 @@ import { createBillingRouter } from './api/billing/routes/billing.routes.js';
 import { createClientsRouter } from './api/clients/routes/clients.routes.js';
 import { DashboardController } from './api/dashboard/dashboard.controller.js';
 import { createDashboardRouter } from './api/dashboard/dashboard.routes.js';
+import { EquipmentController } from './api/inventory/equipment.controller.js';
+import { createEquipmentRouter } from './api/inventory/equipment.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
 import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
@@ -16,6 +18,7 @@ import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { GetBillingSummaryQuery } from './application/queries/dashboard/get-billing-summary.query.js';
 import { GetDashboardOverviewQuery } from './application/queries/dashboard/get-dashboard-overview.query.js';
 import { GetNetworkHealthQuery } from './application/queries/dashboard/get-network-health.query.js';
+import { CreateEquipmentUseCase } from './application/inventory/create-equipment.usecase.js';
 import { ArchiveClient } from './application/use-cases/clients/archive-client/archive-client.use-case.js';
 import { CreateClient } from './application/use-cases/clients/create-client/create-client.use-case.js';
 import { GetClient } from './application/use-cases/clients/get-client/get-client.use-case.js';
@@ -39,6 +42,7 @@ import type { ActorContext } from './application/ports/provisioning/actor-contex
 import { environment } from './infrastructure/config/environment.js';
 import { InMemoryDashboardCache } from './infrastructure/dashboard/in-memory-dashboard.cache.js';
 import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashboard.readers.js';
+import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equipment.repository.js';
 import { SqliteClientRepository } from './infrastructure/database/clients/sqlite/sqlite-client-repository.js';
 import { SqlitePlanRepository } from './infrastructure/database/plans/sqlite/sqlite-plan-repository.js';
 import { SqlitePlanReader } from './infrastructure/plans/readers/sqlite-plan-reader.js';
@@ -109,6 +113,11 @@ const dashboardController = new DashboardController({
   ),
 });
 const dashboardRouter = createDashboardRouter(dashboardController);
+const equipmentRepository = new SqliteEquipmentRepository(sqlite.connection);
+const equipmentController = new EquipmentController(
+  new CreateEquipmentUseCase(equipmentRepository, idGenerator),
+);
+const equipmentRouter = createEquipmentRouter(equipmentController);
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
   createClient: new CreateClient(
@@ -205,7 +214,15 @@ const provisioningController = new ProvisioningController({
 const provisioningRouter = createProvisioningRouter(provisioningController);
 const server = createServer(
   createApp(
-    { billingRouter, clientsRouter, dashboardRouter, plansRouter, provisioningRouter, servicesRouter },
+    {
+      billingRouter,
+      clientsRouter,
+      dashboardRouter,
+      equipmentRouter,
+      plansRouter,
+      provisioningRouter,
+      servicesRouter,
+    },
     {
       apiPrefix: environment.API_PREFIX,
       corsAllowedOrigins: environment.CORS_ALLOWED_ORIGINS,
