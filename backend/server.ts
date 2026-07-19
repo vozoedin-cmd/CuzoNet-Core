@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 
+import { IncidentAlertingController } from './api/alerting/incident-alerting.controller.js';
+import { createIncidentAlertingRouter } from './api/alerting/incident-alerting.routes.js';
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { BillingController } from './api/billing/controller/billing.controller.js';
 import { createBillingRouter } from './api/billing/routes/billing.routes.js';
@@ -20,6 +22,13 @@ import { createServicesRouter } from './api/services/routes/services.routes.js';
 import { GetBillingSummaryQuery } from './application/queries/dashboard/get-billing-summary.query.js';
 import { GetDashboardOverviewQuery } from './application/queries/dashboard/get-dashboard-overview.query.js';
 import { GetNetworkHealthQuery } from './application/queries/dashboard/get-network-health.query.js';
+import { AcknowledgeIncidentUseCase } from './application/use-cases/alerting/acknowledge-incident.usecase.js';
+import { GetIncidentUseCase } from './application/use-cases/alerting/get-incident.usecase.js';
+import { IncidentEngine } from './application/use-cases/alerting/incident-engine.js';
+import { ListAlertRulesUseCase } from './application/use-cases/alerting/list-alert-rules.usecase.js';
+import { ListIncidentsUseCase } from './application/use-cases/alerting/list-incidents.usecase.js';
+import { EvaluateAlertsUseCase } from './application/use-cases/alerting/evaluate-alerts.usecase.js';
+import { InstallDefaultAlertRulesUseCase } from './application/use-cases/alerting/install-default-alert-rules.usecase.js';
 import { GetLatestStateUseCase } from './application/use-cases/monitoring/get-latest-state.usecase.js';
 import { GetTimeSeriesUseCase } from './application/use-cases/monitoring/get-time-series.usecase.js';
 import { GetTopologyStateUseCase } from './application/use-cases/monitoring/get-topology-state.usecase.js';
@@ -46,10 +55,16 @@ import type { BillingActorContext } from './application/ports/billing/billing-ac
 import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
 import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
+import { AlertEvaluator } from './domain/alerting/alert-evaluator.js';
 import { environment } from './infrastructure/config/environment.js';
 import { InMemoryDashboardCache } from './infrastructure/dashboard/in-memory-dashboard.cache.js';
 import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashboard.readers.js';
 import { SqliteEquipmentRepository } from './infrastructure/inventory/sqlite-equipment.repository.js';
+import { SqliteAlertRuleRepository } from './infrastructure/alerting/sqlite-alert-rule.repository.js';
+import { SqliteIncidentRepository } from './infrastructure/alerting/sqlite-incident.repository.js';
+import { SqliteIncidentEventRepository } from './infrastructure/alerting/sqlite-incident-event.repository.js';
+import { SqliteAlertEvaluationStateRepository } from './infrastructure/alerting/sqlite-alert-evaluation-state.repository.js';
+import { NoOpMaintenanceWindowProvider } from './infrastructure/alerting/no-op-maintenance-window.provider.js';
 import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
 import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
 import { EnvironmentMonitoringCredentialProvider } from './infrastructure/monitoring/environment-monitoring-credential.provider.js';
@@ -149,11 +164,41 @@ const equipmentRouter = createEquipmentRouter(equipmentController);
 const observationRepository = new SqliteObservationRepository(sqlite.connection);
 const equipmentStateRepository = new SqliteEquipmentStateRepository(sqlite.connection);
 const monitoringInventoryReader = new SqliteInventoryReaderAdapter(sqlite.connection);
+const alertRuleRepository = new SqliteAlertRuleRepository(sqlite.connection);
+await new InstallDefaultAlertRulesUseCase(alertRuleRepository, idGenerator, clock).execute(
+  companyId,
+);
+const incidentRepository = new SqliteIncidentRepository(sqlite.connection);
+const incidentEventRepository = new SqliteIncidentEventRepository(sqlite.connection);
+const alertEvaluationStateRepository = new SqliteAlertEvaluationStateRepository(sqlite.connection);
+const incidentEngine = new IncidentEngine(
+  incidentRepository,
+  incidentEventRepository,
+  outbox,
+  unitOfWork,
+  idGenerator,
+);
+const alertEvaluator = new EvaluateAlertsUseCase(
+  alertRuleRepository,
+  alertEvaluationStateRepository,
+  new AlertEvaluator(),
+  incidentEngine,
+  new NoOpMaintenanceWindowProvider(),
+);
+const incidentAlertingController = new IncidentAlertingController({
+  acknowledgeIncident: new AcknowledgeIncidentUseCase(incidentEngine, clock),
+  getIncident: new GetIncidentUseCase(incidentRepository),
+  listAlertRules: new ListAlertRulesUseCase(alertRuleRepository),
+  listIncidents: new ListIncidentsUseCase(incidentRepository),
+});
+const alertingRouter = createIncidentAlertingRouter(incidentAlertingController);
 const recordObservationBatch = new RecordObservationBatchUseCase(
   observationRepository,
   equipmentStateRepository,
   monitoringInventoryReader,
   idGenerator,
+  alertEvaluator,
+  { error: (details) => logger.error(details) },
 );
 const monitoringController = new MonitoringController(
   recordObservationBatch,
@@ -206,17 +251,20 @@ const routerOsCollector = new RouterOsCollector(
   { clock },
 );
 
-const monitoringWorker = new MonitoringWorker({
-  collectors: new CollectorRegistry([
-    pingCollector,
-    snmpCollector,
-    routerOsCollector,
-    new NoOpCollector(),
-  ]),
-  inventory: monitoringInventoryReader,
-  recordObservations: recordObservationBatch,
-  observationPriorityPolicy: new SourcePriorityObservationPolicy(),
-}, { clock });
+const monitoringWorker = new MonitoringWorker(
+  {
+    collectors: new CollectorRegistry([
+      pingCollector,
+      snmpCollector,
+      routerOsCollector,
+      new NoOpCollector(),
+    ]),
+    inventory: monitoringInventoryReader,
+    recordObservations: recordObservationBatch,
+    observationPriorityPolicy: new SourcePriorityObservationPolicy(),
+  },
+  { clock },
+);
 const monitoringWorkerHost = new WorkerHost(
   [monitoringWorker],
   new SqliteWorkLeaseRepository(sqlite.session),
@@ -320,6 +368,7 @@ const provisioningRouter = createProvisioningRouter(provisioningController);
 const server = createServer(
   createApp(
     {
+      alertingRouter,
       billingRouter,
       clientsRouter,
       dashboardRouter,

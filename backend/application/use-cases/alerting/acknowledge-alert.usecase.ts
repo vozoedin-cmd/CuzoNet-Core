@@ -1,3 +1,4 @@
+/** @legacy Modelo Alert/AlertPolicy de la migración 0014; no usar en Incident Alerting. */
 
 import type { AlertRepository } from '../../ports/alerting/repositories.js';
 import type { IdGenerator } from '../../ports/id-generator.port.js';

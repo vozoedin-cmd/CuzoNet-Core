@@ -8,6 +8,7 @@ import { requestLoggerMiddleware } from './middlewares/request-logger.middleware
 import { healthRouter } from './routes/health.route.js';
 
 export interface AppDependencies {
+  alertingRouter?: Router;
   billingRouter?: Router;
   clientsRouter?: Router;
   dashboardRouter?: Router;
@@ -39,6 +40,9 @@ export function createApp(dependencies: AppDependencies = {}, config: AppConfig 
   app.use(createCorsMiddleware(corsAllowedOrigins));
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
   apiRouter.use(healthRouter);
+  if (dependencies.alertingRouter !== undefined) {
+    apiRouter.use(dependencies.alertingRouter);
+  }
   if (dependencies.billingRouter !== undefined) {
     apiRouter.use(dependencies.billingRouter);
   }

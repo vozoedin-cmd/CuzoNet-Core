@@ -1,10 +1,11 @@
-import { Observation } from '../../../domain/monitoring/observation.js';
-import { EquipmentState } from '../../../domain/monitoring/equipment-state.js';
-import type { ObservationRepository } from '../../ports/monitoring/observation.repository.js';
+import type { IdGenerator } from '../../ports/id-generator.port.js';
+import type { AlertingBatchEvaluator } from '../../ports/monitoring/alert-evaluator.port.js';
 import type { EquipmentStateRepository } from '../../ports/monitoring/equipment-state.repository.js';
 import type { InventoryReader } from '../../ports/monitoring/inventory.reader.js';
+import type { ObservationRepository } from '../../ports/monitoring/observation.repository.js';
+import { EquipmentState } from '../../../domain/monitoring/equipment-state.js';
 import type { MetricUnit } from '../../../domain/monitoring/metric-value.js';
-import type { IdGenerator } from '../../ports/id-generator.port.js';
+import { Observation } from '../../../domain/monitoring/observation.js';
 
 export interface RecordObservationCommand {
   equipmentId: string;
@@ -15,64 +16,72 @@ export interface RecordObservationCommand {
   source: string;
 }
 
+export interface MonitoringAlertingLogger {
+  error(input: Readonly<Record<string, unknown>>): void;
+}
+
+const noOpLogger: MonitoringAlertingLogger = { error: () => undefined };
+
 export class RecordObservationBatchUseCase {
-  constructor(
+  public constructor(
     private readonly observationRepo: ObservationRepository,
     private readonly stateRepo: EquipmentStateRepository,
     private readonly inventoryReader: InventoryReader,
-    private readonly idGenerator: IdGenerator
+    private readonly idGenerator: IdGenerator,
+    private readonly alertEvaluator?: AlertingBatchEvaluator,
+    private readonly logger: MonitoringAlertingLogger = noOpLogger,
   ) {}
 
   public async execute(companyId: string, commands: RecordObservationCommand[]): Promise<void> {
     if (commands.length === 0) return;
-
     const validObservations: Observation[] = [];
-    
-    // Group by equipmentId to minimize inventory reads and state reads
+    const equipmentStates: EquipmentState[] = [];
     const equipmentMap = new Map<string, RecordObservationCommand[]>();
-    for (const cmd of commands) {
-      if (!equipmentMap.has(cmd.equipmentId)) {
-        equipmentMap.set(cmd.equipmentId, []);
-      }
-      equipmentMap.get(cmd.equipmentId)!.push(cmd);
+    for (const command of commands) {
+      const equipmentCommands = equipmentMap.get(command.equipmentId) ?? [];
+      equipmentCommands.push(command);
+      equipmentMap.set(command.equipmentId, equipmentCommands);
     }
 
-    for (const [eqId, eqCommands] of equipmentMap.entries()) {
-      const eqRef = await this.inventoryReader.findEquipmentById(eqId);
-      if (!eqRef || eqRef.companyId !== companyId) {
-        // Skip metrics for unknown equipment or wrong company
-        continue;
-      }
-
-      const eqObservations: Observation[] = [];
-      for (const cmd of eqCommands) {
-        eqObservations.push(Observation.create({
+    for (const [equipmentId, equipmentCommands] of equipmentMap) {
+      const equipment = await this.inventoryReader.findEquipmentById(equipmentId);
+      if (equipment === null || equipment.companyId !== companyId) continue;
+      const observations = equipmentCommands.map((command) =>
+        Observation.create({
+          equipmentId: command.equipmentId,
           id: this.idGenerator.generate(),
-          equipmentId: cmd.equipmentId,
-          metricType: cmd.metricType,
-          value: cmd.value,
-          unit: cmd.unit,
-          occurredAt: cmd.timestamp,
-          source: cmd.source
-        }));
-      }
-
-      let state = await this.stateRepo.findById(eqId);
-      if (!state) {
-        state = EquipmentState.create({
-          equipmentId: eqId,
-          status: 'UNKNOWN'
-        });
-      }
-
-      state.applyObservations(eqObservations);
-      
-      await this.stateRepo.save(state);
-      validObservations.push(...eqObservations);
+          metricType: command.metricType,
+          occurredAt: command.timestamp,
+          source: command.source,
+          unit: command.unit,
+          value: command.value,
+        }),
+      );
+      const state =
+        (await this.stateRepo.findById(equipmentId)) ??
+        EquipmentState.create({ equipmentId, status: 'UNKNOWN' });
+      state.applyObservations(observations);
+      equipmentStates.push(state);
+      validObservations.push(...observations);
     }
 
-    if (validObservations.length > 0) {
-      await this.observationRepo.saveBatch(validObservations);
+    if (validObservations.length === 0) return;
+    await this.observationRepo.saveBatch(validObservations);
+    for (const state of equipmentStates) await this.stateRepo.save(state);
+
+    try {
+      await this.alertEvaluator?.evaluate({
+        companyId,
+        equipmentStates,
+        observations: validObservations,
+      });
+    } catch (error) {
+      this.logger.error({
+        action: 'monitoring.alerting.failed',
+        companyId,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        module: 'monitoring',
+      });
     }
   }
 }

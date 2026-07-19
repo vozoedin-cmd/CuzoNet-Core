@@ -1,3 +1,4 @@
+/** @legacy Modelo Alert/AlertPolicy de la migración 0014; no usar en Incident Alerting. */
 
 // Simplified interfaces for integration with other modules
 export interface MonitoringAlertReader {

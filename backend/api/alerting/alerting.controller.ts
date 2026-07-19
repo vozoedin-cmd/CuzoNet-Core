@@ -1,3 +1,4 @@
+/** @legacy Modelo Alert/AlertPolicy de la migración 0014; no usar en Incident Alerting. */
 
 import type { EvaluateAlertPoliciesUseCase } from '../../application/use-cases/alerting/evaluate-alert-policies.usecase.js';
 import type { AcknowledgeAlertUseCase } from '../../application/use-cases/alerting/acknowledge-alert.usecase.js';

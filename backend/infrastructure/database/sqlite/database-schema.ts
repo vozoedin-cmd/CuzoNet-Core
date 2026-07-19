@@ -1,4 +1,4 @@
-﻿type Nullable<T> = T | null;
+type Nullable<T> = T | null;
 
 export interface SchemaMigrationTable {
   applied_at: string;
@@ -342,7 +342,68 @@ export interface NetworkAssetTable {
   status: 'active' | 'inactive' | 'retired';
 }
 
+export interface AlertRuleTable {
+  code: string;
+  company_id: string;
+  condition_type: 'equipment_status' | 'metric_threshold';
+  created_at: string;
+  duration_seconds: number;
+  enabled: number;
+  expected_status: Nullable<'DOWN'>;
+  id: string;
+  metric_type: Nullable<string>;
+  name: string;
+  operator: 'equals' | 'greater_than';
+  recovery_duration_seconds: number;
+  severity: 'info' | 'warning' | 'minor' | 'major' | 'critical';
+  threshold: Nullable<number>;
+  updated_at: string;
+}
+
+export interface IncidentTable {
+  acknowledged_at: Nullable<string>;
+  acknowledged_by: Nullable<string>;
+  company_id: string;
+  correlation_key: string;
+  created_at: string;
+  duration_seconds: Nullable<number>;
+  equipment_id: string;
+  id: string;
+  last_evaluated_at: string;
+  last_triggered_at: string;
+  opened_at: string;
+  resolved_at: Nullable<string>;
+  rule_id: string;
+  severity: 'info' | 'warning' | 'minor' | 'major' | 'critical';
+  status: 'open' | 'acknowledged' | 'resolved';
+  title: string;
+  updated_at: string;
+}
+
+export interface IncidentEventTable {
+  company_id: string;
+  created_at: string;
+  id: string;
+  incident_id: string;
+  occurred_at: string;
+  payload_json: string;
+  type: 'opened' | 'condition_reconfirmed' | 'acknowledged' | 'resolved' | 'reopened';
+}
+
+export interface AlertEvaluationStateTable {
+  company_id: string;
+  condition_started_at: Nullable<string>;
+  equipment_id: string;
+  last_condition_matched: number;
+  last_observed_at: Nullable<string>;
+  recovery_started_at: Nullable<string>;
+  rule_id: string;
+  updated_at: string;
+}
+
 export interface DatabaseSchema {
+  alert_evaluation_states: AlertEvaluationStateTable;
+  alert_rules: AlertRuleTable;
   automation_executions: AutomationExecutionTable;
   automation_rule_versions: AutomationRuleVersionTable;
   automation_rules: AutomationRuleTable;
@@ -357,6 +418,8 @@ export interface DatabaseSchema {
   document_sequences: DocumentSequenceTable;
   event_deliveries: EventDeliveryTable;
   idempotency_keys: IdempotencyKeyTable;
+  incident_events: IncidentEventTable;
+  incidents: IncidentTable;
   invoice_items: InvoiceItemTable;
   invoices: InvoiceTable;
   outbox_events: OutboxEventTable;

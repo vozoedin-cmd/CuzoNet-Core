@@ -1,3 +1,4 @@
+/** @legacy Modelo Alert/AlertPolicy de la migración 0014; no usar en Incident Alerting. */
 
 import type { Database } from 'better-sqlite3';
 import type { MonitoringAlertReader } from '../../application/ports/alerting/readers.js';

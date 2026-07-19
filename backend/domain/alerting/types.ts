@@ -1,5 +1,8 @@
-
-export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
+/**
+ * Tipos del modelo de alertas legado (migración 0014).
+ * AlertRule e Incident usan tipos aislados en incident-types.ts.
+ */
+export type AlertSeverity = 'CRITICAL' | 'MAJOR' | 'WARNING' | 'INFO';
 export type AlertStatus = 'TRIGGERED' | 'ACKNOWLEDGED' | 'RESOLVED' | 'SILENCED';
 export type AlertCategory = 'NETWORK' | 'BILLING' | 'SYSTEM';
 export type EntityType = 'equipment' | 'invoice' | 'node';

@@ -1,3 +1,4 @@
+/** @legacy Modelo Alert/AlertPolicy de la migración 0014; no usar en Incident Alerting. */
 
 import type { AlertSeverity, AlertStatus, EntityType } from './types.js';
 

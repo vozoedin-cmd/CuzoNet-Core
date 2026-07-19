@@ -1,4 +1,4 @@
-﻿import { ApplicationError } from '../../../shared/errors/application-error.js';
+import { ApplicationError } from '../../../shared/errors/application-error.js';
 
 export interface ApiError {
   code: string;
@@ -27,6 +27,7 @@ const applicationErrorStatusCodes: Readonly<Record<string, number>> = {
   CORS_HEADERS_NOT_ALLOWED: 403,
   CORS_METHOD_NOT_ALLOWED: 403,
   CORS_ORIGIN_NOT_ALLOWED: 403,
+  INCIDENT_STATE_CONFLICT: 409,
   INVALID_CLIENT_DATA: 422,
   INVALID_EQUIPMENT_DATA: 422,
   INVALID_BILLING_DATA: 422,
