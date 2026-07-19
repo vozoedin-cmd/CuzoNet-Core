@@ -14,6 +14,7 @@ export interface AppDependencies {
   dashboardRouter?: Router;
   equipmentRouter?: Router;
   monitoringRouter?: Router;
+  notificationsRouter?: Router;
   plansRouter?: Router;
   provisioningRouter?: Router;
   servicesRouter?: Router;
@@ -57,6 +58,9 @@ export function createApp(dependencies: AppDependencies = {}, config: AppConfig 
   }
   if (dependencies.monitoringRouter !== undefined) {
     apiRouter.use(dependencies.monitoringRouter);
+  }
+  if (dependencies.notificationsRouter !== undefined) {
+    apiRouter.use(dependencies.notificationsRouter);
   }
   if (dependencies.plansRouter !== undefined) {
     apiRouter.use(dependencies.plansRouter);

@@ -1,16 +1,12 @@
-
-import type { NotificationChannel, NotificationStatus, RecipientAddress, TemplateVariables } from '../../../domain/notifications/types.js';
-
-export interface CreateNotificationRequest {
-  companyId: string;
-  templateCode: string;
-  destinations: { recipient: RecipientAddress, channel: NotificationChannel }[];
-  variables: TemplateVariables;
-  idempotencyKey?: string;
-}
+import type {
+  NotificationChannelType,
+  NotificationPriority,
+  NotificationStatus,
+} from '../../../domain/notifications/types.js';
 
 export interface NotificationDto {
+  channel: NotificationChannelType;
   id: string;
+  priority: NotificationPriority;
   status: NotificationStatus;
-  createdAt: Date;
 }

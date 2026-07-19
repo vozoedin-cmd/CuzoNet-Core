@@ -1,9 +1,10 @@
-﻿import type { AutomationUnitOfWork } from '../../../application/ports/automation/automation-unit-of-work.port.js';
+import type { AutomationUnitOfWork } from '../../../application/ports/automation/automation-unit-of-work.port.js';
 import type { BillingUnitOfWork } from '../../../application/ports/billing/billing-unit-of-work.port.js';
 import type { ProvisioningUnitOfWork } from '../../../application/ports/provisioning/provisioning-unit-of-work.port.js';
 import type { ClientUnitOfWork } from '../../../application/ports/clients/client-outbox.port.js';
 import type { ServiceUnitOfWork } from '../../../application/ports/services/service-outbox.port.js';
 import type { PlanUnitOfWork } from '../../../application/ports/plans/plan-outbox.port.js';
+import type { NotificationUnitOfWork } from '../../../application/ports/notifications/repositories.js';
 import type { SqliteDatabaseSession } from './sqlite-database-session.js';
 
 export class SqliteUnitOfWork
@@ -13,6 +14,7 @@ export class SqliteUnitOfWork
     ProvisioningUnitOfWork,
     ClientUnitOfWork,
     PlanUnitOfWork,
+    NotificationUnitOfWork,
     ServiceUnitOfWork
 {
   public constructor(private readonly session: SqliteDatabaseSession) {}

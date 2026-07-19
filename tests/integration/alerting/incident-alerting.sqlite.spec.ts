@@ -60,7 +60,7 @@ describe('Incident Alerting SQLite integration', () => {
 
   afterEach(async () => database.close());
 
-  it('creates the complete version 17 schema while preserving legacy alerting', () => {
+  it('creates the complete version 18 schema while preserving legacy alerting', () => {
     const tables = database.connection
       .prepare(
         `SELECT name FROM sqlite_master
@@ -79,7 +79,7 @@ describe('Incident Alerting SQLite integration', () => {
       'incident_events',
       'incidents',
     ]);
-    expect(new MigrationRunner(database.connection).currentVersion()).toBe(17);
+    expect(new MigrationRunner(database.connection).currentVersion()).toBe(18);
   });
 
   it('installs default company rules idempotently with recovery windows', async () => {

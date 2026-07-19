@@ -1,3 +1,4 @@
+import type { WorkLeaseTable } from '../../database/sqlite/database-schema.js';
 import type { SqliteDatabaseSession } from '../../database/sqlite/sqlite-database-session.js';
 import type {
   RenewWorkLeaseInput,
@@ -13,7 +14,7 @@ interface WorkLeaseRow {
   fencing_token: number;
   owner_id: string;
   renewed_at: string;
-  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
+  role: WorkerRole | WorkLeaseTable['role'];
   work_id: string;
 }
 

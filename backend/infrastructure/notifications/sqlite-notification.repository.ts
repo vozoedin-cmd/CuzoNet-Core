@@ -1,105 +1,204 @@
+import { sql } from 'kysely';
 
-import type { Database } from 'better-sqlite3';
-import type { NotificationRepository, NotificationIdempotencyPort } from '../../application/ports/notifications/repositories.js';
-import { Notification, type NotificationDeliveryProps, type DeliveryAttemptProps } from '../../domain/notifications/notification.js';
-import type { NotificationChannel, NotificationStatus, DeliveryStatus, TemplateVariables } from '../../domain/notifications/types.js';
+import type {
+  ClaimPendingNotificationInput,
+  NotificationListFilters,
+  NotificationRepository,
+} from '../../application/ports/notifications/repositories.js';
+import { Notification } from '../../domain/notifications/notification.js';
+import type { IncidentNotificationEvent } from '../../domain/notifications/types.js';
+import type { NotificationTable } from '../database/sqlite/database-schema.js';
+import type { SqliteDatabaseSession } from '../database/sqlite/sqlite-database-session.js';
 
 export class SqliteNotificationRepository implements NotificationRepository {
-  constructor(private readonly db: Database) {}
+  public constructor(private readonly session: SqliteDatabaseSession) {}
 
-  public async save(notification: Notification): Promise<void> {
-    const n = notification.props;
-    
-    this.db.transaction(() => {
-      this.db.prepare(`
-        INSERT INTO notifications (id, company_id, template_id, template_version_id, variables_payload, status, idempotency_key, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET status = excluded.status
-      `).run(n.id, n.companyId, n.templateId, n.templateVersionId, JSON.stringify(n.variables), n.status, n.idempotencyKey || null, n.createdAt.toISOString());
-
-      const delStmt = this.db.prepare(`
-        INSERT INTO notification_deliveries (id, notification_id, recipient_id, address, channel, status, attempt_count, next_attempt_at, claim_token, claim_expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          status = excluded.status,
-          attempt_count = excluded.attempt_count,
-          next_attempt_at = excluded.next_attempt_at,
-          claim_token = excluded.claim_token,
-          claim_expires_at = excluded.claim_expires_at
-      `);
-
-      const attStmt = this.db.prepare(`
-        INSERT INTO notification_delivery_attempts (id, delivery_id, occurred_at, error_code, error_message)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO NOTHING
-      `);
-
-      for (const d of n.deliveries) {
-        delStmt.run(
-          d.id, n.id, d.recipient.recipientId || null, d.recipient.address, d.channel, d.status, d.attemptCount,
-          d.nextAttemptAt ? d.nextAttemptAt.toISOString() : null,
-          d.claimToken || null,
-          d.claimExpiresAt ? d.claimExpiresAt.toISOString() : null
-        );
-
-        for (const a of d.attempts) {
-          attStmt.run(a.id, d.id, a.occurredAt.toISOString(), a.error?.code || null, a.error?.message || null);
-        }
-      }
-    })();
+  public save(notification: Notification): Promise<void> {
+    const row = toRow(notification);
+    return this.session.execute(async (database) => {
+      await database
+        .insertInto('notifications')
+        .values(row)
+        .onConflict((conflict) =>
+          conflict.column('id').doUpdateSet({
+            attempts: row.attempts,
+            failed_at: row.failed_at,
+            last_error: row.last_error,
+            last_failure_retryable: row.last_failure_retryable,
+            processing_lease_until: row.processing_lease_until,
+            processing_started_at: row.processing_started_at,
+            processing_worker_id: row.processing_worker_id,
+            scheduled_at: row.scheduled_at,
+            sent_at: row.sent_at,
+            status: row.status,
+            updated_at: row.updated_at,
+          }),
+        )
+        .execute();
+    });
   }
 
-  public async findById(id: string): Promise<Notification | null> {
-    const row = this.db.prepare('SELECT * FROM notifications WHERE id = ?').get(id) as Record<string, unknown>;
-    if (!row) return null;
-    
-    const dRows = this.db.prepare('SELECT * FROM notification_deliveries WHERE notification_id = ?').all(id) as Record<string, unknown>[];
-    
-    const deliveries: NotificationDeliveryProps[] = dRows.map(dRow => {
-      const aRows = this.db.prepare('SELECT * FROM notification_delivery_attempts WHERE delivery_id = ? ORDER BY occurred_at ASC').all(dRow.id as string) as Record<string, unknown>[];
-      const attempts: DeliveryAttemptProps[] = aRows.map(aRow => ({
-        id: aRow.id as string,
-        occurredAt: new Date(aRow.occurred_at as string),
-        ...(aRow.error_code ? { error: { code: aRow.error_code as string, message: aRow.error_message as string, sanitized: true } } : {})
-      }));
-
-      return {
-        id: dRow.id as string,
-        recipient: { recipientId: dRow.recipient_id as string, address: dRow.address as string },
-        channel: dRow.channel as NotificationChannel,
-        status: dRow.status as DeliveryStatus,
-        attemptCount: dRow.attempt_count as number,
-        ...(dRow.next_attempt_at ? { nextAttemptAt: new Date(dRow.next_attempt_at as string) } : {}),
-        ...(dRow.claim_token ? { claimToken: dRow.claim_token as string } : {}),
-        ...(dRow.claim_expires_at ? { claimExpiresAt: new Date(dRow.claim_expires_at as string) } : {}),
-        attempts
-      };
+  public findById(companyId: string, notificationId: string): Promise<Notification | null> {
+    return this.session.execute(async (database) => {
+      const row = await database
+        .selectFrom('notifications')
+        .selectAll()
+        .where('company_id', '=', companyId)
+        .where('id', '=', notificationId)
+        .executeTakeFirst();
+      return row === undefined ? null : fromRow(row);
     });
+  }
 
-    return Notification.reconstitute({
-      id: row.id as string,
-      companyId: row.company_id as string,
-      templateId: row.template_id as string,
-      templateVersionId: row.template_version_id as string,
-      variables: JSON.parse(row.variables_payload as string) as TemplateVariables,
-      status: row.status as NotificationStatus,
-      ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key as string } : {}),
-      createdAt: new Date(row.created_at as string),
-      deliveries
+  public findByIdempotencyKey(
+    companyId: string,
+    idempotencyKey: string,
+  ): Promise<Notification | null> {
+    return this.session.execute(async (database) => {
+      const row = await database
+        .selectFrom('notifications')
+        .selectAll()
+        .where('company_id', '=', companyId)
+        .where('idempotency_key', '=', idempotencyKey)
+        .executeTakeFirst();
+      return row === undefined ? null : fromRow(row);
+    });
+  }
+
+  public list(
+    companyId: string,
+    filters: NotificationListFilters = {},
+  ): Promise<readonly Notification[]> {
+    return this.session.execute(async (database) => {
+      let query = database
+        .selectFrom('notifications')
+        .selectAll()
+        .where('company_id', '=', companyId);
+      if (filters.channel !== undefined) query = query.where('channel', '=', filters.channel);
+      if (filters.status !== undefined) query = query.where('status', '=', filters.status);
+      if (filters.incidentId !== undefined)
+        query = query.where('incident_id', '=', filters.incidentId);
+      if (filters.destinationId !== undefined)
+        query = query.where('destination_id', '=', filters.destinationId);
+      if (filters.dateFrom !== undefined)
+        query = query.where('created_at', '>=', filters.dateFrom.toISOString());
+      if (filters.dateTo !== undefined)
+        query = query.where('created_at', '<=', filters.dateTo.toISOString());
+      const rows = await query
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc')
+        .limit(filters.limit ?? 100)
+        .offset(filters.offset ?? 0)
+        .execute();
+      return rows.map(fromRow);
+    });
+  }
+
+  public claimNextPending(input: ClaimPendingNotificationInput): Promise<Notification | null> {
+    if (!Number.isInteger(input.leaseDurationSeconds) || input.leaseDurationSeconds < 1)
+      throw new RangeError('leaseDurationSeconds debe ser mayor que cero.');
+    return this.session.execute(async (database) => {
+      const now = input.now.toISOString();
+      const leaseUntil = new Date(
+        input.now.getTime() + input.leaseDurationSeconds * 1_000,
+      ).toISOString();
+      const result = await sql<NotificationTable>`
+        UPDATE notifications
+        SET status = 'processing',
+            processing_started_at = ${now},
+            processing_worker_id = ${input.workerId},
+            processing_lease_until = ${leaseUntil},
+            updated_at = ${now}
+        WHERE id = (
+          SELECT id
+          FROM notifications
+          WHERE attempts < max_attempts
+            AND (
+              (status IN ('pending', 'retrying') AND scheduled_at <= ${now})
+              OR
+              (status = 'processing' AND processing_lease_until IS NOT NULL
+                AND processing_lease_until <= ${now})
+            )
+          ORDER BY scheduled_at ASC, id ASC
+          LIMIT 1
+        )
+        AND attempts < max_attempts
+        AND (
+          (status IN ('pending', 'retrying') AND scheduled_at <= ${now})
+          OR
+          (status = 'processing' AND processing_lease_until IS NOT NULL
+            AND processing_lease_until <= ${now})
+        )
+        RETURNING *
+      `.execute(database);
+      const row = result.rows[0];
+      return row === undefined ? null : fromRow(row);
     });
   }
 }
 
-export class SqliteNotificationIdempotency implements NotificationIdempotencyPort {
-  constructor(private readonly db: Database) {}
+function toRow(notification: Notification): NotificationTable {
+  const props = notification.props;
+  return {
+    attempts: props.attempts,
+    channel: props.channel,
+    company_id: props.companyId,
+    created_at: props.createdAt.toISOString(),
+    destination_id: props.destinationId,
+    failed_at: props.failedAt?.toISOString() ?? null,
+    id: props.id,
+    idempotency_key: props.idempotencyKey,
+    incident_id: props.incidentId,
+    last_error: props.lastError ?? null,
+    last_failure_retryable:
+      props.lastFailureRetryable === undefined ? null : props.lastFailureRetryable ? 1 : 0,
+    max_attempts: props.maxAttempts,
+    payload_json: JSON.stringify(props.payload),
+    priority: props.priority,
+    processing_lease_until: props.processingLeaseUntil?.toISOString() ?? null,
+    processing_started_at: props.processingStartedAt?.toISOString() ?? null,
+    processing_worker_id: props.processingWorkerId ?? null,
+    scheduled_at: props.scheduledAt.toISOString(),
+    sent_at: props.sentAt?.toISOString() ?? null,
+    source_event_id: props.sourceEventId,
+    source_event_type: props.sourceEventType,
+    status: props.status,
+    template_code: props.templateCode,
+    updated_at: props.updatedAt.toISOString(),
+  };
+}
 
-  public async checkAndLock(key: string): Promise<boolean> {
-    try {
-      // Create table explicitly if missing for idempotency general or rely on the unique index in notifications
-      const existing = this.db.prepare('SELECT 1 FROM notifications WHERE idempotency_key = ?').get(key);
-      return existing === undefined;
-    } catch {
-      return false;
-    }
-  }
+function fromRow(row: NotificationTable): Notification {
+  return Notification.reconstitute({
+    attempts: row.attempts,
+    channel: row.channel,
+    companyId: row.company_id,
+    createdAt: new Date(row.created_at),
+    destinationId: row.destination_id,
+    ...(row.failed_at === null ? {} : { failedAt: new Date(row.failed_at) }),
+    id: row.id,
+    idempotencyKey: row.idempotency_key,
+    incidentId: row.incident_id,
+    ...(row.last_error === null ? {} : { lastError: row.last_error }),
+    ...(row.last_failure_retryable === null
+      ? {}
+      : { lastFailureRetryable: row.last_failure_retryable === 1 }),
+    maxAttempts: row.max_attempts,
+    payload: JSON.parse(row.payload_json) as IncidentNotificationEvent,
+    priority: row.priority,
+    ...(row.processing_lease_until === null
+      ? {}
+      : { processingLeaseUntil: new Date(row.processing_lease_until) }),
+    ...(row.processing_started_at === null
+      ? {}
+      : { processingStartedAt: new Date(row.processing_started_at) }),
+    ...(row.processing_worker_id === null ? {} : { processingWorkerId: row.processing_worker_id }),
+    scheduledAt: new Date(row.scheduled_at),
+    ...(row.sent_at === null ? {} : { sentAt: new Date(row.sent_at) }),
+    sourceEventId: row.source_event_id,
+    sourceEventType: row.source_event_type,
+    status: row.status,
+    templateCode: row.template_code,
+    updatedAt: new Date(row.updated_at),
+  });
 }

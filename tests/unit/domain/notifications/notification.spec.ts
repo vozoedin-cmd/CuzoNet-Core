@@ -1,71 +1,97 @@
+import { describe, expect, it } from 'vitest';
 
-import { describe, it, expect } from 'vitest';
 import { Notification } from '../../../../backend/domain/notifications/notification.js';
 
+const now = new Date('2026-07-18T12:00:00.000Z');
+
+function notification() {
+  return Notification.create({
+    channel: 'webhook',
+    companyId: 'company-1',
+    createdAt: now,
+    destinationId: 'destination-1',
+    id: 'notification-1',
+    incidentId: 'incident-1',
+    maxAttempts: 5,
+    payload: {
+      companyId: 'company-1',
+      equipmentId: 'equipment-1',
+      eventId: 'event-1',
+      eventType: 'IncidentOpened.v1',
+      incidentId: 'incident-1',
+      occurredAt: now.toISOString(),
+      ruleId: 'rule-1',
+      severity: 'critical',
+    },
+    priority: 'urgent',
+    scheduledAt: now,
+    sourceEventId: 'event-1',
+    sourceEventType: 'incident_opened',
+    templateCode: 'incident-opened',
+  });
+}
+
 describe('Notification', () => {
-  let deliveryIdCounter = 1;
-  const deliveryIdGen = () => `del_${deliveryIdCounter++}`;
-
-  it('should create a notification in queued state', () => {
-    const n = Notification.create({
-      id: 'n1',
-      companyId: 'c1',
-      templateId: 't1',
-      templateVersionId: 'v1',
-      variables: {},
-      destinations: [
-        { recipient: { recipientId: 'r1', address: '123' }, channel: 'whatsapp' }
-      ],
-      deliveryIdGenerator: deliveryIdGen
-    });
-
-    expect(n.props.status).toBe('queued');
-    expect(n.props.deliveries).toHaveLength(1);
-    expect(n.props.deliveries[0]?.status).toBe('pending');
+  it('creates pending with deterministic idempotency key', () => {
+    const value = notification();
+    expect(value.props.status).toBe('pending');
+    expect(value.props.idempotencyKey).toBe('company-1:event-1:webhook:destination-1');
   });
 
-  it('should claim and complete delivery', () => {
-    const n = Notification.create({
-      id: 'n2', companyId: 'c1', templateId: 't1', templateVersionId: 'v1', variables: {},
-      destinations: [{ recipient: { recipientId: 'r1', address: '123' }, channel: 'whatsapp' }],
-      deliveryIdGenerator: deliveryIdGen
-    });
-
-    const delId = n.props.deliveries[0]?.id as string;
-    n.claimDelivery(delId, 'token123', 60);
-    expect(n.props.deliveries[0]?.status).toBe('claimed');
-    expect(n.props.status).toBe('processing');
-
-    n.completeDelivery(delId);
-    expect(n.props.deliveries[0]?.status).toBe('sent');
-    expect(n.props.status).toBe('delivered');
+  it('transitions pending -> processing -> sent', () => {
+    const value = notification();
+    value.claim(now, 'worker-1', new Date(now.getTime() + 60_000));
+    expect(value.beginAttempt(now, 'worker-1')).toBe(1);
+    value.markSent(new Date(now.getTime() + 1_000), 'worker-1');
+    expect(value.props.status).toBe('sent');
+    expect(value.props.sentAt?.toISOString()).toBe('2026-07-18T12:00:01.000Z');
   });
 
-  it('should fail delivery and schedule retry', () => {
-    const n = Notification.create({
-      id: 'n3', companyId: 'c1', templateId: 't1', templateVersionId: 'v1', variables: {},
-      destinations: [{ recipient: { recipientId: 'r1', address: '123' }, channel: 'whatsapp' }],
-      deliveryIdGenerator: deliveryIdGen
-    });
-
-    const delId = n.props.deliveries[0]?.id as string;
-    n.failDelivery(delId, 'att1', { code: 'ERR', message: 'test', sanitized: true }, 60);
-
-    expect(n.props.deliveries[0]?.status).toBe('pending'); // scheduled for retry
-    expect(n.props.deliveries[0]?.attemptCount).toBe(1);
-    expect(n.props.deliveries[0]?.nextAttemptAt).toBeDefined();
-    expect(n.props.status).toBe('queued');
+  it('transitions processing -> retrying and preserves exact attempt count', () => {
+    const value = notification();
+    value.claim(now, 'worker-1', new Date(now.getTime() + 60_000));
+    value.beginAttempt(now, 'worker-1');
+    const retryAt = new Date(now.getTime() + 30_000);
+    value.markRetrying('HTTP 500\nsecret stack omitted', retryAt, now, 'worker-1');
+    expect(value.props.status).toBe('retrying');
+    expect(value.props.scheduledAt).toEqual(retryAt);
+    expect(value.props.lastError).not.toContain('\n');
   });
 
-  it('should cancel notification', () => {
-    const n = Notification.create({
-      id: 'n4', companyId: 'c1', templateId: 't1', templateVersionId: 'v1', variables: {},
-      destinations: [{ recipient: { recipientId: 'r1', address: '123' }, channel: 'whatsapp' }],
-      deliveryIdGenerator: deliveryIdGen
-    });
+  it('transitions processing -> failed for a permanent error', () => {
+    const value = notification();
+    value.claim(now, 'worker-1', new Date(now.getTime() + 60_000));
+    value.beginAttempt(now, 'worker-1');
+    value.markFailed('HTTP 400', false, now, 'worker-1');
+    expect(value.props.status).toBe('failed');
+    expect(() => value.scheduleManualRetry(now)).toThrow('permanentes');
+  });
 
-    n.cancel();
-    expect(n.props.status).toBe('cancelled');
-    expect(n.props.deliveries[0]?.status).toBe('cancelled');
+  it('cancels before dispatch and rejects invalid transitions', () => {
+    const value = notification();
+    value.cancel('operator request', now);
+    expect(value.props.status).toBe('cancelled');
+    expect(() => value.cancel(undefined, now)).toThrow();
+  });
+
+  it('recovers an expired processing lease but not a live lease', () => {
+    const value = notification();
+    value.claim(now, 'worker-1', new Date(now.getTime() + 10_000));
+    expect(() =>
+      value.claim(new Date(now.getTime() + 5_000), 'worker-2', new Date(now.getTime() + 20_000)),
+    ).toThrow();
+    value.claim(new Date(now.getTime() + 10_000), 'worker-2', new Date(now.getTime() + 70_000));
+    expect(value.props.processingWorkerId).toBe('worker-2');
+  });
+
+  it('rejects payload from another company', () => {
+    const value = notification();
+    expect(() =>
+      Notification.create({
+        ...value.props,
+        id: 'notification-2',
+        payload: { ...value.props.payload, companyId: 'company-2' },
+      }),
+    ).toThrow('misma compañía');
   });
 });

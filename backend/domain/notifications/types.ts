@@ -1,19 +1,44 @@
+export const notificationStatuses = [
+  'pending',
+  'processing',
+  'sent',
+  'retrying',
+  'failed',
+  'cancelled',
+  'skipped',
+] as const;
 
-export type NotificationChannel = 'whatsapp' | 'telegram' | 'email' | 'webhook';
-export type NotificationStatus = 'queued' | 'processing' | 'partially_delivered' | 'delivered' | 'failed' | 'cancelled';
-export type DeliveryStatus = 'pending' | 'claimed' | 'sent' | 'failed' | 'cancelled' | 'manual_review';
+export type NotificationStatus = (typeof notificationStatuses)[number];
 
-export interface TemplateVariables {
-  [key: string]: unknown;
-}
+export const notificationChannelTypes = ['webhook', 'whatsapp', 'telegram', 'email'] as const;
 
-export interface DeliveryError {
-  code: string;
-  message: string;
-  sanitized: boolean;
-}
+export type NotificationChannelType = (typeof notificationChannelTypes)[number];
 
-export interface RecipientAddress {
-  recipientId: string;
-  address: string; // phone number, email, chat id, url
+export const notificationEventTypes = [
+  'incident_opened',
+  'incident_acknowledged',
+  'incident_resolved',
+] as const;
+
+export type NotificationEventType = (typeof notificationEventTypes)[number];
+
+export const notificationPriorities = ['low', 'normal', 'high', 'urgent'] as const;
+
+export type NotificationPriority = (typeof notificationPriorities)[number];
+
+export type NotificationAttemptStatus = 'processing' | 'sent' | 'retrying' | 'failed';
+
+export type JsonPrimitive = boolean | number | string | null;
+export type JsonValue =
+  JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+export interface IncidentNotificationEvent {
+  companyId: string;
+  equipmentId: string;
+  eventId: string;
+  eventType: 'IncidentOpened.v1' | 'IncidentAcknowledged.v1' | 'IncidentResolved.v1';
+  incidentId: string;
+  occurredAt: string;
+  ruleId: string;
+  severity: 'info' | 'warning' | 'minor' | 'major' | 'critical';
 }

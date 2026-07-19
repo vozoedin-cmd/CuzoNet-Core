@@ -16,9 +16,7 @@ const timeZoneSchema = z
     }
   });
 
-const booleanStringSchema = z
-  .enum(['true', 'false'])
-  .transform((value) => value === 'true');
+const booleanStringSchema = z.enum(['true', 'false']).transform((value) => value === 'true');
 
 const environmentSchema = z.object({
   API_PREFIX: z
@@ -45,6 +43,13 @@ const environmentSchema = z.object({
   MONITORING_SNMP_COMMUNITY: z.string().trim().min(1).optional(),
   MONITORING_SNMP_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
   MONITORING_SNMP_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(3_000),
+  NOTIFICATION_WORKER_ENABLED: booleanStringSchema.default(false),
+  NOTIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  NOTIFICATION_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(20),
+  NOTIFICATION_WORKER_LEASE_SECONDS: z.coerce.number().int().min(5).max(3_600).default(60),
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(5),
+  NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  NOTIFICATION_WEBHOOK_ALLOW_HTTP: booleanStringSchema.default(false),
 });
 
 const parsedEnvironment = environmentSchema.safeParse({
@@ -68,6 +73,13 @@ const parsedEnvironment = environmentSchema.safeParse({
   MONITORING_ROUTEROS_USERNAME: process.env.MONITORING_ROUTEROS_USERNAME,
   MONITORING_SNMP_RETRIES: process.env.MONITORING_SNMP_RETRIES,
   MONITORING_SNMP_TIMEOUT_MS: process.env.MONITORING_SNMP_TIMEOUT_MS,
+  NOTIFICATION_WORKER_ENABLED: process.env.NOTIFICATION_WORKER_ENABLED,
+  NOTIFICATION_WORKER_INTERVAL_MS: process.env.NOTIFICATION_WORKER_INTERVAL_MS,
+  NOTIFICATION_WORKER_BATCH_SIZE: process.env.NOTIFICATION_WORKER_BATCH_SIZE,
+  NOTIFICATION_WORKER_LEASE_SECONDS: process.env.NOTIFICATION_WORKER_LEASE_SECONDS,
+  NOTIFICATION_MAX_ATTEMPTS: process.env.NOTIFICATION_MAX_ATTEMPTS,
+  NOTIFICATION_WEBHOOK_TIMEOUT_MS: process.env.NOTIFICATION_WEBHOOK_TIMEOUT_MS,
+  NOTIFICATION_WEBHOOK_ALLOW_HTTP: process.env.NOTIFICATION_WEBHOOK_ALLOW_HTTP,
 });
 
 if (!parsedEnvironment.success) {

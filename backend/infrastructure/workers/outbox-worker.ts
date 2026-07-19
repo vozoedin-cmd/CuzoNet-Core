@@ -1,11 +1,17 @@
-import { automationEventTypes } from '../../domain/automation/value-objects/event-trigger.js';
 import type { Clock } from '../../application/ports/clock.port.js';
+import { automationEventTypes } from '../../domain/automation/value-objects/event-trigger.js';
 import type { SqliteDatabaseSession } from '../database/sqlite/sqlite-database-session.js';
 import type { WorkerExecutionContext, WorkerRoleHandler } from './worker-contracts.js';
 import { WorkerRole } from './worker-role.js';
 
 const automationConsumer = 'automation';
+const notificationConsumer = 'notifications';
 const supportedAutomationEvents = new Set<string>(automationEventTypes);
+const supportedNotificationEvents = new Set<string>([
+  'IncidentOpened.v1',
+  'IncidentAcknowledged.v1',
+  'IncidentResolved.v1',
+]);
 
 export interface OutboxWorkItem {
   eventId: string;
@@ -37,19 +43,24 @@ export class SqliteOutboxWorkRepository {
           .where('id', '=', item.eventId)
           .executeTakeFirst();
         if (event === undefined || event.published_at !== null) return false;
-        if (supportedAutomationEvents.has(event.event_type)) {
+        const consumers: string[] = [];
+        if (supportedAutomationEvents.has(event.event_type)) consumers.push(automationConsumer);
+        if (supportedNotificationEvents.has(event.event_type)) consumers.push(notificationConsumer);
+        if (consumers.length > 0) {
           await database
             .insertInto('event_deliveries')
-            .values({
-              attempt_count: 0,
-              consumer_name: automationConsumer,
-              event_id: event.id,
-              id: `${event.id}:${automationConsumer}`,
-              last_error: null,
-              next_attempt_at: null,
-              processed_at: null,
-              status: 'pending',
-            })
+            .values(
+              consumers.map((consumer) => ({
+                attempt_count: 0,
+                consumer_name: consumer,
+                event_id: event.id,
+                id: `${event.id}:${consumer}`,
+                last_error: null,
+                next_attempt_at: null,
+                processed_at: null,
+                status: 'pending' as const,
+              })),
+            )
             .onConflict((conflict) => conflict.columns(['event_id', 'consumer_name']).doNothing())
             .execute();
         }

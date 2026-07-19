@@ -13,6 +13,7 @@ import { monitoringWorkerMigration } from '../migrations/0015-monitoring-worker.
 import { equipmentManagementHostMigration } from '../migrations/0016-equipment-management-host.js';
 import { incidentAlertingMigration } from '../migrations/0017-incident-alerting.js';
 import { networkMigration } from '../migrations/0012-network.js';
+import { notificationEngineMigration } from '../migrations/0018-notification-engine.js';
 import { plansMigration } from '../migrations/0010-plans.js';
 import { workersMigration } from '../migrations/0008-workers.js';
 import type { Migration } from './migration.js';
@@ -35,4 +36,5 @@ export const migrations: readonly Migration[] = Object.freeze([
   monitoringWorkerMigration,
   equipmentManagementHostMigration,
   incidentAlertingMigration,
+  notificationEngineMigration,
 ]);

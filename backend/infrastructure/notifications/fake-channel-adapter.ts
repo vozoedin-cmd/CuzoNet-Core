@@ -1,15 +1,23 @@
+import type {
+  NotificationChannel,
+  NotificationChannelSendInput,
+  NotificationSendResult,
+} from '../../application/ports/notifications/channels.js';
+import type { NotificationChannelType } from '../../domain/notifications/types.js';
 
-import type { NotificationChannelAdapter, RenderedMessage } from '../../application/ports/notifications/adapters.js';
-import type { NotificationDeliveryProps } from '../../domain/notifications/notification.js';
+/** Test double only. It never performs network I/O. */
+export class FakeNotificationChannel implements NotificationChannel {
+  public readonly sent: NotificationChannelSendInput[] = [];
 
-export class FakeChannelAdapter implements NotificationChannelAdapter {
-  constructor(private readonly shouldFail: boolean = false) {}
+  public constructor(
+    public readonly type: NotificationChannelType,
+    private readonly result: NotificationSendResult = { type: 'success' },
+  ) {}
 
-  public async send(_delivery: NotificationDeliveryProps, _rendered: RenderedMessage): Promise<void> {
-    if (this.shouldFail) {
-      throw new Error('Simulated fake failure');
-    }
-    // simulate delay
-    await new Promise(resolve => setTimeout(resolve, 50));
+  public async send(input: NotificationChannelSendInput): Promise<NotificationSendResult> {
+    this.sent.push(input);
+    return this.result;
   }
 }
+
+export { FakeNotificationChannel as FakeChannelAdapter };

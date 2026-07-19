@@ -1,34 +1,46 @@
+import { describe, expect, it } from 'vitest';
 
-import { describe, it, expect } from 'vitest';
-import { NotificationTemplate } from '../../../../backend/domain/notifications/notification-template.js';
+import { NotificationTemplateRenderer } from '../../../../backend/domain/notifications/notification-template.js';
 
-describe('NotificationTemplate', () => {
-  it('should create template and add versions', () => {
-    const t = NotificationTemplate.create({
-      id: 't1',
-      companyId: 'c1',
-      code: 'WELCOME',
-      name: 'Welcome Email',
-      defaultChannel: 'email'
+const event = {
+  companyId: 'company-1',
+  equipmentId: 'equipment-1',
+  eventId: 'event-1',
+  eventType: 'IncidentOpened.v1' as const,
+  incidentId: 'incident-1',
+  occurredAt: '2026-07-18T12:00:00.000Z',
+  ruleId: 'rule-1',
+  severity: 'critical' as const,
+};
+
+describe('NotificationTemplateRenderer', () => {
+  it.each([
+    ['incident-opened', 'INCIDENT OPENED'],
+    ['incident-acknowledged', 'INCIDENT ACKNOWLEDGED'],
+    ['incident-resolved', 'INCIDENT RESOLVED'],
+  ])('renders code-backed template %s', (templateCode, heading) => {
+    const rendered = new NotificationTemplateRenderer().render({
+      channel: 'webhook',
+      event,
+      notificationId: 'notification-1',
+      priority: 'urgent',
+      templateCode,
     });
-
-    expect(t.props.code).toBe('WELCOME');
-    
-    t.addDraftVersion('v1', 'Hello {{name}}');
-    expect(t.props.versions).toHaveLength(1);
-    expect(t.props.versions[0]?.version).toBe(1);
-    expect(t.props.versions[0]?.isPublished).toBe(false);
-
-    t.publishVersion('v1');
-    expect(t.props.versions[0]?.isPublished).toBe(true);
-
-    const published = t.getPublishedVersion();
-    expect(published?.id).toBe('v1');
+    expect(rendered.subject).toBe(heading);
+    expect(rendered.text).toContain('equipment-1');
+    expect(rendered.text).toContain('incident-1');
+    expect(JSON.stringify(rendered)).not.toMatch(/password|token|community/i);
   });
 
-  it('should reject missing code', () => {
-    expect(() => NotificationTemplate.create({
-      id: 't1', companyId: 'c1', code: '', name: 'N', defaultChannel: 'email'
-    })).toThrow('Template code is required');
+  it('rejects an unknown template', () => {
+    expect(() =>
+      new NotificationTemplateRenderer().render({
+        channel: 'email',
+        event,
+        notificationId: 'notification-1',
+        priority: 'normal',
+        templateCode: 'unknown',
+      }),
+    ).toThrow('no soportada');
   });
 });

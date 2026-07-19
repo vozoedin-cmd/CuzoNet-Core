@@ -308,7 +308,13 @@ export interface WorkLeaseTable {
   fencing_token: number;
   owner_id: string;
   renewed_at: string;
-  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
+  role:
+    | 'automation'
+    | 'monitoring'
+    | 'notification_dispatch'
+    | 'notification_outbox'
+    | 'outbox'
+    | 'provisioning';
   work_id: string;
 }
 
@@ -321,7 +327,13 @@ export interface WorkerStatisticsTable {
   lease_lost_count: number;
   processed_count: number;
   retry_count: number;
-  role: 'automation' | 'monitoring' | 'outbox' | 'provisioning';
+  role:
+    | 'automation'
+    | 'monitoring'
+    | 'notification_dispatch'
+    | 'notification_outbox'
+    | 'outbox'
+    | 'provisioning';
   skipped_count: number;
   started_at: string;
   stopped_at: Nullable<string>;
@@ -401,6 +413,70 @@ export interface AlertEvaluationStateTable {
   updated_at: string;
 }
 
+export interface NotificationDestinationTable {
+  channel: 'webhook' | 'whatsapp' | 'telegram' | 'email';
+  company_id: string;
+  configuration_reference: string;
+  created_at: string;
+  enabled: number;
+  event_types_json: string;
+  id: string;
+  minimum_severity: Nullable<'info' | 'warning' | 'minor' | 'major' | 'critical'>;
+  name: string;
+  updated_at: string;
+}
+
+export interface NotificationTable {
+  attempts: number;
+  channel: 'webhook' | 'whatsapp' | 'telegram' | 'email';
+  company_id: string;
+  created_at: string;
+  destination_id: string;
+  failed_at: Nullable<string>;
+  id: string;
+  idempotency_key: string;
+  incident_id: string;
+  last_error: Nullable<string>;
+  last_failure_retryable: Nullable<number>;
+  max_attempts: number;
+  payload_json: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  processing_lease_until: Nullable<string>;
+  processing_started_at: Nullable<string>;
+  processing_worker_id: Nullable<string>;
+  scheduled_at: string;
+  sent_at: Nullable<string>;
+  source_event_id: string;
+  source_event_type: 'incident_opened' | 'incident_acknowledged' | 'incident_resolved';
+  status: 'pending' | 'processing' | 'sent' | 'retrying' | 'failed' | 'cancelled' | 'skipped';
+  template_code: string;
+  updated_at: string;
+}
+
+export interface NotificationAttemptTable {
+  attempt_number: number;
+  completed_at: Nullable<string>;
+  created_at: string;
+  error_code: Nullable<string>;
+  error_message: Nullable<string>;
+  id: string;
+  metadata_json: Nullable<string>;
+  notification_id: string;
+  response_code: Nullable<number>;
+  retry_at: Nullable<string>;
+  started_at: string;
+  status: 'processing' | 'sent' | 'retrying' | 'failed';
+}
+
+export interface NotificationEventReceiptTable {
+  company_id: string;
+  created_notifications: number;
+  event_id: string;
+  event_type: string;
+  last_error: Nullable<string>;
+  processed_at: string;
+  status: 'processed' | 'failed';
+}
 export interface DatabaseSchema {
   alert_evaluation_states: AlertEvaluationStateTable;
   alert_rules: AlertRuleTable;
@@ -429,6 +505,10 @@ export interface DatabaseSchema {
   plans: PlanTable;
   mikrotik_resources: MikrotikResourceTable;
   network_assets: NetworkAssetTable;
+  notification_attempts: NotificationAttemptTable;
+  notification_destinations: NotificationDestinationTable;
+  notification_event_receipts: NotificationEventReceiptTable;
+  notifications: NotificationTable;
   provisioning_operations: ProvisioningOperationTable;
   schema_migrations: SchemaMigrationTable;
   work_leases: WorkLeaseTable;

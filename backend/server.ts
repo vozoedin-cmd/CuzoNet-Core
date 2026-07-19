@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 
 import { IncidentAlertingController } from './api/alerting/incident-alerting.controller.js';
 import { createIncidentAlertingRouter } from './api/alerting/incident-alerting.routes.js';
+import { NotificationsController } from './api/notifications/notifications.controller.js';
+import { createNotificationsRouter } from './api/notifications/notifications.routes.js';
 import { ClientsController } from './api/clients/controller/clients.controller.js';
 import { BillingController } from './api/billing/controller/billing.controller.js';
 import { createBillingRouter } from './api/billing/routes/billing.routes.js';
@@ -29,6 +31,23 @@ import { ListAlertRulesUseCase } from './application/use-cases/alerting/list-ale
 import { ListIncidentsUseCase } from './application/use-cases/alerting/list-incidents.usecase.js';
 import { EvaluateAlertsUseCase } from './application/use-cases/alerting/evaluate-alerts.usecase.js';
 import { InstallDefaultAlertRulesUseCase } from './application/use-cases/alerting/install-default-alert-rules.usecase.js';
+import { CancelNotificationUseCase } from './application/use-cases/notifications/cancel-notification.usecase.js';
+import { CreateNotificationsFromIncidentEventUseCase } from './application/use-cases/notifications/create-notifications-from-incident-event.usecase.js';
+import { DispatchPendingNotificationUseCase } from './application/use-cases/notifications/dispatch-pending-notification.usecase.js';
+import { GetNotificationUseCase } from './application/use-cases/notifications/get-notification.usecase.js';
+import { ListNotificationsUseCase } from './application/use-cases/notifications/list-notifications.usecase.js';
+import {
+  CreateNotificationDestinationUseCase,
+  DeleteNotificationDestinationUseCase,
+  ListNotificationDestinationsUseCase,
+  UpdateNotificationDestinationUseCase,
+} from './application/use-cases/notifications/manage-notification-destinations.usecase.js';
+import {
+  NotificationChannelRegistry,
+  NotificationDispatcher,
+} from './application/use-cases/notifications/notification-dispatcher.js';
+import { NotificationEventHandler } from './application/use-cases/notifications/notification-event-handler.js';
+import { RetryNotificationUseCase } from './application/use-cases/notifications/retry-notification.usecase.js';
 import { GetLatestStateUseCase } from './application/use-cases/monitoring/get-latest-state.usecase.js';
 import { GetTimeSeriesUseCase } from './application/use-cases/monitoring/get-time-series.usecase.js';
 import { GetTopologyStateUseCase } from './application/use-cases/monitoring/get-topology-state.usecase.js';
@@ -56,6 +75,9 @@ import type { Clock } from './application/ports/clock.port.js';
 import type { CompanyContext } from './application/ports/company-context.port.js';
 import type { ActorContext } from './application/ports/provisioning/actor-context.port.js';
 import { AlertEvaluator } from './domain/alerting/alert-evaluator.js';
+import { NotificationPolicy } from './domain/notifications/notification-policy.js';
+import { NotificationRetryPolicy } from './domain/notifications/notification-retry-policy.js';
+import { NotificationTemplateRenderer } from './domain/notifications/notification-template.js';
 import { environment } from './infrastructure/config/environment.js';
 import { InMemoryDashboardCache } from './infrastructure/dashboard/in-memory-dashboard.cache.js';
 import { SqliteDashboardReaders } from './infrastructure/dashboard/sqlite-dashboard.readers.js';
@@ -65,6 +87,17 @@ import { SqliteIncidentRepository } from './infrastructure/alerting/sqlite-incid
 import { SqliteIncidentEventRepository } from './infrastructure/alerting/sqlite-incident-event.repository.js';
 import { SqliteAlertEvaluationStateRepository } from './infrastructure/alerting/sqlite-alert-evaluation-state.repository.js';
 import { NoOpMaintenanceWindowProvider } from './infrastructure/alerting/no-op-maintenance-window.provider.js';
+import {
+  DisabledEmailNotificationChannel,
+  DisabledTelegramNotificationChannel,
+  DisabledWhatsAppNotificationChannel,
+} from './infrastructure/notifications/disabled-notification.channels.js';
+import { EnvironmentNotificationCredentialProvider } from './infrastructure/notifications/environment-notification-credential.provider.js';
+import { SqliteNotificationAttemptRepository } from './infrastructure/notifications/sqlite-notification-attempt.repository.js';
+import { SqliteNotificationDestinationRepository } from './infrastructure/notifications/sqlite-notification-destination.repository.js';
+import { SqliteNotificationEventReceiptRepository } from './infrastructure/notifications/sqlite-notification-event-receipt.repository.js';
+import { SqliteNotificationRepository } from './infrastructure/notifications/sqlite-notification.repository.js';
+import { WebhookNotificationChannel } from './infrastructure/notifications/webhook-notification.channel.js';
 import { SqliteEquipmentStateRepository } from './infrastructure/monitoring/sqlite-equipment-state.repository.js';
 import { CollectorRegistry } from './infrastructure/monitoring/collector-registry.js';
 import { EnvironmentMonitoringCredentialProvider } from './infrastructure/monitoring/environment-monitoring-credential.provider.js';
@@ -102,6 +135,15 @@ import { ExponentialRetryPolicy } from './infrastructure/provisioning/retry/expo
 import { ServiceReaderProvisioningAdapter } from './infrastructure/provisioning/services/service-reader-provisioning.adapter.js';
 import { SqliteSingleCompanyContext } from './infrastructure/tenancy/sqlite-single-company-context.js';
 import { MonitoringWorker } from './infrastructure/workers/monitoring-worker.js';
+import { NotificationDispatchWorker } from './infrastructure/workers/notification-dispatch-worker.js';
+import {
+  NotificationOutboxWorker,
+  SqliteNotificationOutboxWorkRepository,
+} from './infrastructure/workers/notification-outbox-worker.js';
+import {
+  OutboxWorker,
+  SqliteOutboxWorkRepository,
+} from './infrastructure/workers/outbox-worker.js';
 import { SqliteWorkLeaseRepository } from './infrastructure/workers/sqlite/sqlite-work-lease-repository.js';
 import { SqliteWorkerStatisticsRepository } from './infrastructure/workers/sqlite/sqlite-worker-statistics-repository.js';
 import { WorkerHost } from './infrastructure/workers/worker-host.js';
@@ -192,6 +234,66 @@ const incidentAlertingController = new IncidentAlertingController({
   listIncidents: new ListIncidentsUseCase(incidentRepository),
 });
 const alertingRouter = createIncidentAlertingRouter(incidentAlertingController);
+const notificationRepository = new SqliteNotificationRepository(sqlite.session);
+const notificationAttemptRepository = new SqliteNotificationAttemptRepository(sqlite.session);
+const notificationDestinationRepository = new SqliteNotificationDestinationRepository(
+  sqlite.session,
+);
+const notificationReceiptRepository = new SqliteNotificationEventReceiptRepository(sqlite.session);
+const createNotificationsFromIncidentEvent = new CreateNotificationsFromIncidentEventUseCase(
+  notificationRepository,
+  notificationDestinationRepository,
+  notificationReceiptRepository,
+  new NotificationPolicy(),
+  unitOfWork,
+  idGenerator,
+  clock,
+  environment.NOTIFICATION_MAX_ATTEMPTS,
+);
+const notificationDispatcher = new NotificationDispatcher(
+  new NotificationChannelRegistry([
+    new WebhookNotificationChannel({
+      allowHttp: environment.NODE_ENV === 'test' || environment.NOTIFICATION_WEBHOOK_ALLOW_HTTP,
+      timeoutMs: environment.NOTIFICATION_WEBHOOK_TIMEOUT_MS,
+    }),
+    new DisabledWhatsAppNotificationChannel(),
+    new DisabledTelegramNotificationChannel(),
+    new DisabledEmailNotificationChannel(),
+  ]),
+  new NotificationTemplateRenderer(),
+  new EnvironmentNotificationCredentialProvider(),
+);
+const dispatchPendingNotification = new DispatchPendingNotificationUseCase(
+  notificationRepository,
+  notificationAttemptRepository,
+  notificationDestinationRepository,
+  notificationDispatcher,
+  new NotificationRetryPolicy(environment.NOTIFICATION_MAX_ATTEMPTS),
+  unitOfWork,
+  idGenerator,
+  clock,
+);
+const notificationsController = new NotificationsController({
+  cancelNotification: new CancelNotificationUseCase(notificationRepository, clock),
+  createDestination: new CreateNotificationDestinationUseCase(
+    notificationDestinationRepository,
+    idGenerator,
+    clock,
+  ),
+  deleteDestination: new DeleteNotificationDestinationUseCase(notificationDestinationRepository),
+  getNotification: new GetNotificationUseCase(
+    notificationRepository,
+    notificationAttemptRepository,
+  ),
+  listDestinations: new ListNotificationDestinationsUseCase(notificationDestinationRepository),
+  listNotifications: new ListNotificationsUseCase(notificationRepository),
+  retryNotification: new RetryNotificationUseCase(notificationRepository, clock),
+  updateDestination: new UpdateNotificationDestinationUseCase(
+    notificationDestinationRepository,
+    clock,
+  ),
+});
+const notificationsRouter = createNotificationsRouter(notificationsController);
 const recordObservationBatch = new RecordObservationBatchUseCase(
   observationRepository,
   equipmentStateRepository,
@@ -270,6 +372,39 @@ const monitoringWorkerHost = new WorkerHost(
   new SqliteWorkLeaseRepository(sqlite.session),
   new SqliteWorkerStatisticsRepository(sqlite.session),
   `monitoring-${process.pid}`,
+);
+const notificationWorkerId = `notifications-${process.pid}`;
+const notificationWorkerHost = new WorkerHost(
+  [
+    new OutboxWorker(new SqliteOutboxWorkRepository(sqlite.session), clock),
+    new NotificationOutboxWorker(
+      new SqliteNotificationOutboxWorkRepository(sqlite.session),
+      new NotificationEventHandler(createNotificationsFromIncidentEvent),
+      clock,
+      {},
+      { error: (details) => logger.error(details) },
+    ),
+    new NotificationDispatchWorker(
+      notificationRepository,
+      dispatchPendingNotification,
+      clock,
+      { error: (details) => logger.error(details) },
+      {
+        batchSize: environment.NOTIFICATION_WORKER_BATCH_SIZE,
+        leaseDurationSeconds: environment.NOTIFICATION_WORKER_LEASE_SECONDS,
+        workerId: notificationWorkerId,
+      },
+    ),
+  ],
+  new SqliteWorkLeaseRepository(sqlite.session),
+  new SqliteWorkerStatisticsRepository(sqlite.session),
+  notificationWorkerId,
+  {
+    idleDelayMs: environment.NOTIFICATION_WORKER_INTERVAL_MS,
+    leaseDurationMs: environment.NOTIFICATION_WORKER_LEASE_SECONDS * 1_000,
+    leaseRenewalMs: Math.max(1_000, environment.NOTIFICATION_WORKER_LEASE_SECONDS * 500),
+  },
+  clock,
 );
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
@@ -374,6 +509,7 @@ const server = createServer(
       dashboardRouter,
       equipmentRouter,
       monitoringRouter,
+      notificationsRouter,
       plansRouter,
       provisioningRouter,
       servicesRouter,
@@ -416,6 +552,7 @@ function shutdown(signal: NodeJS.Signals): void {
     }
 
     try {
+      if (environment.NOTIFICATION_WORKER_ENABLED) await notificationWorkerHost.stop();
       await monitoringWorkerHost.stop();
       await sqlite.close();
       logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
@@ -446,6 +583,15 @@ process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
 
 server.listen(environment.PORT, () => {
+  if (environment.NOTIFICATION_WORKER_ENABLED) {
+    void notificationWorkerHost.start().catch((error: unknown) => {
+      logger.error({
+        action: 'notification.workers.start.failed',
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        module: 'notifications',
+      });
+    });
+  }
   logger.info({
     action: 'server.started',
     module: 'server',
