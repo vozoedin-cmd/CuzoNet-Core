@@ -8,13 +8,24 @@ export interface WebhookNotificationCredentials {
   url: string;
 }
 
+export interface WhatsAppNotificationCredentials {
+  apiKey: string;
+  baseUrl: string;
+  channel: 'whatsapp';
+  defaultCountryCode?: string;
+  instanceName: string;
+  timeoutMs?: number;
+}
+
 export interface DisabledNotificationCredentials {
-  channel: 'email' | 'telegram' | 'whatsapp';
+  channel: 'email' | 'telegram';
   configurationReference: string;
 }
 
 export type NotificationCredentials =
-  WebhookNotificationCredentials | DisabledNotificationCredentials;
+  | WebhookNotificationCredentials
+  | WhatsAppNotificationCredentials
+  | DisabledNotificationCredentials;
 
 export interface NotificationCredentialProvider {
   get(input: {

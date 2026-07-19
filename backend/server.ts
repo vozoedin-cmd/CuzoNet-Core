@@ -90,8 +90,8 @@ import { NoOpMaintenanceWindowProvider } from './infrastructure/alerting/no-op-m
 import {
   DisabledEmailNotificationChannel,
   DisabledTelegramNotificationChannel,
-  DisabledWhatsAppNotificationChannel,
 } from './infrastructure/notifications/disabled-notification.channels.js';
+import { EvolutionApiWhatsAppNotificationChannel } from './infrastructure/notifications/whatsapp-notification.channel.js';
 import { EnvironmentNotificationCredentialProvider } from './infrastructure/notifications/environment-notification-credential.provider.js';
 import { SqliteNotificationAttemptRepository } from './infrastructure/notifications/sqlite-notification-attempt.repository.js';
 import { SqliteNotificationDestinationRepository } from './infrastructure/notifications/sqlite-notification-destination.repository.js';
@@ -256,7 +256,11 @@ const notificationDispatcher = new NotificationDispatcher(
       allowHttp: environment.NODE_ENV === 'test' || environment.NOTIFICATION_WEBHOOK_ALLOW_HTTP,
       timeoutMs: environment.NOTIFICATION_WEBHOOK_TIMEOUT_MS,
     }),
-    new DisabledWhatsAppNotificationChannel(),
+    new EvolutionApiWhatsAppNotificationChannel({
+      allowHttp: environment.NODE_ENV === 'test' || environment.NOTIFICATION_WHATSAPP_ALLOW_HTTP,
+      timeoutMs: environment.NOTIFICATION_WHATSAPP_TIMEOUT_MS,
+      maxTextLength: environment.NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH,
+    }),
     new DisabledTelegramNotificationChannel(),
     new DisabledEmailNotificationChannel(),
   ]),

@@ -30,6 +30,7 @@ export const cancelNotificationBodySchema = z.strictObject({
   reason: optionalReason,
 });
 export const saveDestinationBodySchema = z.strictObject({
+  address: z.string().trim().max(100).optional(),
   channel: channelSchema,
   companyId: identifier,
   configurationReference: z.string().regex(/^[A-Z][A-Z0-9_]{2,99}$/),

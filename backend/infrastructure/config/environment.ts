@@ -50,6 +50,9 @@ const environmentSchema = z.object({
   NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(5),
   NOTIFICATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
   NOTIFICATION_WEBHOOK_ALLOW_HTTP: booleanStringSchema.default(false),
+  NOTIFICATION_WHATSAPP_ALLOW_HTTP: booleanStringSchema.default(false),
+  NOTIFICATION_WHATSAPP_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH: z.coerce.number().int().min(1).max(65536).default(4096),
 });
 
 const parsedEnvironment = environmentSchema.safeParse({
@@ -80,6 +83,9 @@ const parsedEnvironment = environmentSchema.safeParse({
   NOTIFICATION_MAX_ATTEMPTS: process.env.NOTIFICATION_MAX_ATTEMPTS,
   NOTIFICATION_WEBHOOK_TIMEOUT_MS: process.env.NOTIFICATION_WEBHOOK_TIMEOUT_MS,
   NOTIFICATION_WEBHOOK_ALLOW_HTTP: process.env.NOTIFICATION_WEBHOOK_ALLOW_HTTP,
+  NOTIFICATION_WHATSAPP_ALLOW_HTTP: process.env.NOTIFICATION_WHATSAPP_ALLOW_HTTP,
+  NOTIFICATION_WHATSAPP_TIMEOUT_MS: process.env.NOTIFICATION_WHATSAPP_TIMEOUT_MS,
+  NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH: process.env.NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH,
 });
 
 if (!parsedEnvironment.success) {

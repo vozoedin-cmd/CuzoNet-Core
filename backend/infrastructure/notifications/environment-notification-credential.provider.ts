@@ -20,6 +20,25 @@ export class EnvironmentNotificationCredentialProvider implements NotificationCr
         url,
       };
     }
-    return { channel: input.channel, configurationReference: reference };
+    if (input.channel === 'whatsapp') {
+      const baseUrl = this.values[`${reference}_BASE_URL`];
+      const apiKey = this.values[`${reference}_API_KEY`];
+      const instanceName = this.values[`${reference}_INSTANCE_NAME`];
+      if (!baseUrl || !apiKey || !instanceName) return null;
+      
+      const defaultCountryCode = this.values[`${reference}_DEFAULT_COUNTRY_CODE`];
+      const timeoutStr = this.values[`${reference}_TIMEOUT_MS`];
+      const timeoutMs = timeoutStr ? parseInt(timeoutStr, 10) : undefined;
+      
+      return {
+        apiKey,
+        baseUrl,
+        channel: 'whatsapp',
+        ...(defaultCountryCode ? { defaultCountryCode } : {}),
+        instanceName,
+        ...(timeoutMs && !isNaN(timeoutMs) ? { timeoutMs } : {}),
+      };
+    }
+    return { channel: input.channel as 'email' | 'telegram', configurationReference: reference };
   }
 }

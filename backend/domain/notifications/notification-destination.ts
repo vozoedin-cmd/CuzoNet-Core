@@ -4,6 +4,7 @@ export interface NotificationDestinationProps {
   channel: NotificationChannelType;
   companyId: string;
   configurationReference: string;
+  address?: string;
   createdAt: Date;
   enabled: boolean;
   eventTypes: readonly NotificationEventType[];
@@ -23,6 +24,13 @@ export class NotificationDestination {
     if (!/^[A-Z][A-Z0-9_]{2,99}$/.test(props.configurationReference))
       throw new TypeError('configurationReference debe ser una referencia de entorno válida.');
     if (props.eventTypes.length === 0) throw new TypeError('Debe configurarse al menos un evento.');
+    
+    if (props.channel === 'whatsapp' && props.enabled) {
+      if (typeof props.address !== 'string' || props.address.trim().length === 0) {
+        throw new TypeError('address es obligatorio para destinos WhatsApp habilitados.');
+      }
+    }
+
     return new NotificationDestination({
       ...props,
       eventTypes: Object.freeze([...new Set(props.eventTypes)]),

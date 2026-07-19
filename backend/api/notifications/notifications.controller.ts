@@ -95,10 +95,11 @@ export class NotificationsController {
 
   public readonly createDestination: RequestHandler = async (request, response) => {
     const body = parseNotificationRequest(saveDestinationBodySchema, request.body);
-    const { minimumSeverity, ...input } = body;
+    const { minimumSeverity, address, ...input } = body;
     const destination = await this.dependencies.createDestination.execute({
       ...input,
       ...(minimumSeverity === undefined ? {} : { minimumSeverity }),
+      ...(address === undefined ? {} : { address }),
     });
     response.status(201).json(toDestinationDto(destination));
   };
@@ -106,10 +107,11 @@ export class NotificationsController {
   public readonly updateDestination: RequestHandler = async (request, response) => {
     const params = parseNotificationRequest(destinationIdParamsSchema, request.params);
     const body = parseNotificationRequest(saveDestinationBodySchema, request.body);
-    const { minimumSeverity, ...input } = body;
+    const { minimumSeverity, address, ...input } = body;
     const destination = await this.dependencies.updateDestination.execute(params.destinationId, {
       ...input,
       ...(minimumSeverity === undefined ? {} : { minimumSeverity }),
+      ...(address === undefined ? {} : { address }),
     });
     response.status(200).json(toDestinationDto(destination));
   };
@@ -166,6 +168,7 @@ function toAttemptDto(attempt: NotificationAttempt): Record<string, unknown> {
 function toDestinationDto(destination: NotificationDestination): Record<string, unknown> {
   const props = destination.props;
   return {
+    address: props.address ?? null,
     channel: props.channel,
     companyId: props.companyId,
     configurationReference: props.configurationReference,

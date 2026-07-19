@@ -19,6 +19,7 @@ export interface SaveNotificationDestinationInput {
   eventTypes: readonly NotificationEventType[];
   minimumSeverity?: 'info' | 'warning' | 'minor' | 'major' | 'critical';
   name: string;
+  address?: string;
 }
 
 export class CreateNotificationDestinationUseCase {

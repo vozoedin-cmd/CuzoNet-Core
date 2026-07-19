@@ -15,6 +15,7 @@ export class SqliteNotificationDestinationRepository implements NotificationDest
         .values(row)
         .onConflict((conflict) =>
           conflict.column('id').doUpdateSet({
+            address: row.address,
             channel: row.channel,
             configuration_reference: row.configuration_reference,
             enabled: row.enabled,
@@ -80,6 +81,7 @@ export class SqliteNotificationDestinationRepository implements NotificationDest
 function toRow(destination: NotificationDestination): NotificationDestinationTable {
   const props = destination.props;
   return {
+    address: props.address ?? null,
     channel: props.channel,
     company_id: props.companyId,
     configuration_reference: props.configurationReference,
@@ -95,6 +97,7 @@ function toRow(destination: NotificationDestination): NotificationDestinationTab
 
 function fromRow(row: NotificationDestinationTable): NotificationDestination {
   return NotificationDestination.reconstitute({
+    ...(row.address === null ? {} : { address: row.address }),
     channel: row.channel,
     companyId: row.company_id,
     configurationReference: row.configuration_reference,

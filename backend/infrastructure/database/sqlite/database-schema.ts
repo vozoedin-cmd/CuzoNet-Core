@@ -414,6 +414,7 @@ export interface AlertEvaluationStateTable {
 }
 
 export interface NotificationDestinationTable {
+  address: Nullable<string>;
   channel: 'webhook' | 'whatsapp' | 'telegram' | 'email';
   company_id: string;
   configuration_reference: string;

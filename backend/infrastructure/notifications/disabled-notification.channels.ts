@@ -17,9 +17,6 @@ abstract class DisabledNotificationChannel implements NotificationChannel {
   }
 }
 
-export class DisabledWhatsAppNotificationChannel extends DisabledNotificationChannel {
-  public readonly type = 'whatsapp' as const;
-}
 
 export class DisabledTelegramNotificationChannel extends DisabledNotificationChannel {
   public readonly type = 'telegram' as const;
