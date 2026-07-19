@@ -18,7 +18,7 @@ const timeZoneSchema = z
 
 const booleanStringSchema = z.enum(['true', 'false']).transform((value) => value === 'true');
 
-const environmentSchema = z.object({
+export const environmentSchema = z.object({
   API_PREFIX: z
     .string()
     .trim()
@@ -44,6 +44,12 @@ const environmentSchema = z.object({
   MONITORING_SNMP_RETRIES: z.coerce.number().int().min(0).max(5).default(1),
   MONITORING_SNMP_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(3_000),
   NOTIFICATION_WORKER_ENABLED: booleanStringSchema.default(false),
+  AUTOMATION_WORKER_ENABLED: booleanStringSchema.default(false),
+  AUTOMATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(100).max(60000).default(5000),
+  AUTOMATION_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(20),
+  AUTOMATION_WORKER_LEASE_SECONDS: z.coerce.number().int().min(5).max(3600).default(60),
+  AUTOMATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  AUTOMATION_MAX_CAUSAL_DEPTH: z.coerce.number().int().min(1).max(20).default(5),
   NOTIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
   NOTIFICATION_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(20),
   NOTIFICATION_WORKER_LEASE_SECONDS: z.coerce.number().int().min(5).max(3_600).default(60),
@@ -77,6 +83,12 @@ const parsedEnvironment = environmentSchema.safeParse({
   MONITORING_SNMP_RETRIES: process.env.MONITORING_SNMP_RETRIES,
   MONITORING_SNMP_TIMEOUT_MS: process.env.MONITORING_SNMP_TIMEOUT_MS,
   NOTIFICATION_WORKER_ENABLED: process.env.NOTIFICATION_WORKER_ENABLED,
+  AUTOMATION_WORKER_ENABLED: process.env.AUTOMATION_WORKER_ENABLED,
+  AUTOMATION_WORKER_INTERVAL_MS: process.env.AUTOMATION_WORKER_INTERVAL_MS,
+  AUTOMATION_WORKER_BATCH_SIZE: process.env.AUTOMATION_WORKER_BATCH_SIZE,
+  AUTOMATION_WORKER_LEASE_SECONDS: process.env.AUTOMATION_WORKER_LEASE_SECONDS,
+  AUTOMATION_MAX_ATTEMPTS: process.env.AUTOMATION_MAX_ATTEMPTS,
+  AUTOMATION_MAX_CAUSAL_DEPTH: process.env.AUTOMATION_MAX_CAUSAL_DEPTH,
   NOTIFICATION_WORKER_INTERVAL_MS: process.env.NOTIFICATION_WORKER_INTERVAL_MS,
   NOTIFICATION_WORKER_BATCH_SIZE: process.env.NOTIFICATION_WORKER_BATCH_SIZE,
   NOTIFICATION_WORKER_LEASE_SECONDS: process.env.NOTIFICATION_WORKER_LEASE_SECONDS,

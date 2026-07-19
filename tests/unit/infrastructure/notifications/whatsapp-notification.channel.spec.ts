@@ -124,7 +124,8 @@ describe('EvolutionApiWhatsAppNotificationChannel', () => {
 
   it('returns permanentFailure if address is missing', async () => {
     const channel = new EvolutionApiWhatsAppNotificationChannel();
-    const badDest = NotificationDestination.reconstitute({ ...destination.props, address: undefined });
+    const { address: _address, ...rest } = destination.props;
+    const badDest = NotificationDestination.reconstitute(rest);
     await expect(
       channel.send({
         credentials: { apiKey: 'k', baseUrl: 'https://ev.test', channel: 'whatsapp', instanceName: 'i' },

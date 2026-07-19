@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { AutomationFactsPort } from '../../../../backend/application/ports/automation/automation-facts.port.js';
-import type { ServiceReactivationRequestPort } from '../../../../backend/application/ports/automation/service-reactivation-request.port.js';
 import type { Clock } from '../../../../backend/application/ports/clock.port.js';
 import type { CompanyContext } from '../../../../backend/application/ports/company-context.port.js';
 import type { IdGenerator } from '../../../../backend/application/ports/id-generator.port.js';
@@ -12,7 +11,6 @@ import { EvaluationContext } from '../../../../backend/domain/automation/value-o
 import { InMemoryAutomationEventReceipt } from '../../../../backend/infrastructure/database/automation/in-memory/in-memory-automation-event-receipt.js';
 import { InMemoryAutomationExecutionRepository } from '../../../../backend/infrastructure/database/automation/in-memory/in-memory-automation-execution-repository.js';
 import { InMemoryAutomationRuleRepository } from '../../../../backend/infrastructure/database/automation/in-memory/in-memory-automation-rule-repository.js';
-import { InMemoryAutomationUnitOfWork } from '../../../../backend/infrastructure/database/automation/in-memory/in-memory-automation-unit-of-work.js';
 
 const companyContext: CompanyContext = { getCompanyId: () => 'company-one' };
 const actorContext = { getActorId: () => 'actor-one' };
@@ -39,7 +37,7 @@ function ruleInput(priority = 500) {
   return {
     actions: [
       {
-        actionType: 'request_service_reactivation',
+        actionType: 'request_service_reactivation' as const,
         actionVersion: 1,
         reasonCode: 'PAYMENT_CLEARED',
         targetFactPath: 'service.id',
@@ -135,7 +133,6 @@ describe('Automation use cases', () => {
     ).execute(ruleInput());
     const executions = new InMemoryAutomationExecutionRepository();
     const receipts = new InMemoryAutomationEventReceipt();
-    const requested: string[] = [];
     const facts: AutomationFactsPort = {
       buildContexts: () =>
         Promise.resolve([
@@ -146,19 +143,11 @@ describe('Automation use cases', () => {
           }),
         ]),
     };
-    const actions: ServiceReactivationRequestPort = {
-      requestReactivation: (request) => {
-        requested.push(request.actionRequestKey);
-        return Promise.resolve({ requestId: 'reactivation-one', status: 'accepted' });
-      },
-    };
     const evaluate = new EvaluateDomainEvent(
       rules,
       executions,
       receipts,
       facts,
-      actions,
-      new InMemoryAutomationUnitOfWork(),
       companyContext,
       new SequentialIdGenerator([executionId]),
       clock,
@@ -193,10 +182,9 @@ describe('Automation use cases', () => {
       rulesMatched: 1,
     });
     expect(repeated.alreadyProcessed).toBe(true);
-    expect(requested).toHaveLength(1);
     await expect(executions.findById('company-one', executionId)).resolves.toMatchObject({
-      actionResults: [{ actionVersion: 1, status: 'accepted' }],
-      status: 'action_requested',
+      actionType: 'request_service_reactivation',
+      status: 'pending',
     });
   });
 });

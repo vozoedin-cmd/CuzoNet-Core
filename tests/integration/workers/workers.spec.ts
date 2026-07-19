@@ -12,7 +12,7 @@ import {
   SqliteOutboxWorkRepository,
 } from '../../../backend/infrastructure/workers/outbox-worker.js';
 import {
-  AutomationWorker,
+  AutomationOutboxWorker,
   SqliteAutomationWorkRepository,
 } from '../../../backend/infrastructure/workers/automation-worker.js';
 import { RenewWorkLease } from '../../../backend/infrastructure/workers/renew-work-lease.js';
@@ -228,7 +228,7 @@ describe('Workers integration', () => {
     await statistics.recordStarted(WorkerRole.Automation, 'host-a', clock.now());
     const host = new WorkerHost(
       [
-        new AutomationWorker(
+        new AutomationOutboxWorker(
           new SqliteAutomationWorkRepository(primary.session),
           { execute: () => Promise.reject(new Error('temporary failure')) },
           clock,

@@ -13,7 +13,7 @@ function input(name: string, priority: number) {
   return {
     actions: [
       {
-        actionType: 'request_service_reactivation',
+        actionType: 'request_service_reactivation' as const,
         actionVersion: 1,
         reasonCode: 'PAYMENT_CLEARED',
         targetFactPath: 'service.id',

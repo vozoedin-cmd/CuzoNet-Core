@@ -101,7 +101,7 @@ describe('Notification Engine SQLite integration', () => {
       .run(now.toISOString());
     new MigrationRunner(database.connection, { now: () => now }).migrate();
 
-    expect(new MigrationRunner(database.connection).currentVersion()).toBe(19);
+    expect(new MigrationRunner(database.connection).currentVersion()).toBe(20);
     expect(
       database.connection.prepare('SELECT id FROM companies WHERE id = ?').get('preserved-company'),
     ).toEqual({ id: 'preserved-company' });

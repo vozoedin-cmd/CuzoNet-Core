@@ -237,24 +237,26 @@ describe('SQLite Billing and Automation adapters', () => {
     ]);
     await rules.save(rule);
     await executions.save(companyId, {
-      actionResults: [],
-      completedAt: now.toISOString(),
-      contextId: serviceId,
+      actionSnapshotJson: '{}',
+      actionType: 'noop',
+      attemptCount: 0,
+      companyId,
+      createdAt: now.toISOString(),
       eventId,
+      eventSnapshotJson: '{}',
+      eventType: 'PaymentRecorded.v1',
       id: executionId,
-      matched: false,
+      maxAttempts: 5,
       ruleId,
-      ruleVersion: 1,
-      startedAt: now.toISOString(),
-      status: 'evaluated_no_match',
+      status: 'pending',
+      updatedAt: now.toISOString(),
     });
     await receipts.mark(companyId, eventId, 'processing');
     await receipts.mark(companyId, eventId, 'processed');
 
     expect(await rules.findById(companyId, ruleId)).toMatchObject({ priority: 750 });
     expect(await executions.findById(companyId, executionId)).toMatchObject({
-      matched: false,
-      status: 'evaluated_no_match',
+      status: 'pending',
     });
     await expect(receipts.getStatus(companyId, eventId)).resolves.toBe('processed');
   });

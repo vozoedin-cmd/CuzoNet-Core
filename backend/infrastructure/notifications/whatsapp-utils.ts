@@ -18,7 +18,7 @@ export function normalizeWhatsAppRecipient(
   }
 
   // Remove spaces, dashes, parenthesis, + and domain
-  let digits = address.split('@')[0].replace(/[\s\-\(\)\+]/g, '');
+  let digits = (address.split('@')[0] || '').replace(/[\s\-()+]/g, '');
 
   if (!/^\d+$/.test(digits)) {
     throw new Error('El número contiene caracteres no permitidos.');

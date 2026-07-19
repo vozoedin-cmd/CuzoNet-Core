@@ -27,12 +27,21 @@ function serializeCondition(node: NormalizedRuleCondition): RuleConditionDefinit
 export const sqliteAutomationRuleMapper = {
   serializeActions(rule: AutomationRule): string {
     return JSON.stringify(
-      rule.actions.map((action) => ({
-        actionType: action.actionType,
-        actionVersion: action.actionVersion,
-        reasonCode: action.reasonCode,
-        targetFactPath: action.targetFactPath.value,
-      })),
+      rule.actions.map((action) => {
+        const result: Record<string, unknown> = {
+          actionType: action.actionType,
+          actionVersion: action.actionVersion,
+        };
+        if (action.reasonCode !== undefined) result.reasonCode = action.reasonCode;
+        if (action.targetFactPath !== undefined) result.targetFactPath = action.targetFactPath.value;
+        if (action.configurationReference !== undefined) result.configurationReference = action.configurationReference;
+        if (action.payloadTemplate !== undefined) result.payloadTemplate = action.payloadTemplate;
+        if (action.workflowKey !== undefined) result.workflowKey = action.workflowKey;
+        if (action.operationType !== undefined) result.operationType = action.operationType;
+        if (action.equipmentId !== undefined) result.equipmentId = action.equipmentId;
+        if (action.parameters !== undefined) result.parameters = action.parameters;
+        return result;
+      }),
     );
   },
   serializeCondition(rule: AutomationRule): string {

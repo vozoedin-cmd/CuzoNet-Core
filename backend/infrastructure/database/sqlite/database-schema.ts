@@ -271,19 +271,44 @@ export interface AutomationRuleVersionTable {
 }
 
 export interface AutomationExecutionTable {
-  action_results: string;
-  company_id: string;
-  completed_at: Nullable<string>;
-  context_id: string;
-  error_code: Nullable<string>;
-  error_message: Nullable<string>;
-  event_id: string;
   id: string;
-  matched: number;
+  company_id: string;
   rule_id: string;
-  rule_version: number;
-  started_at: string;
+  event_id: string;
+  event_type: string;
+  action_type: string;
+  action_snapshot_json: string;
+  event_snapshot_json: string;
   status: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  processing_started_at: string | null;
+  processing_worker_id: string | null;
+  processing_lease_until: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  provider_execution_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationAttemptTable {
+  id: string;
+  execution_id: string;
+  attempt_number: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  response_code: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  provider_execution_id: string | null;
+  metadata_json: string;
+  created_at: string;
 }
 
 export interface MikrotikResourceTable {
@@ -310,6 +335,7 @@ export interface WorkLeaseTable {
   renewed_at: string;
   role:
     | 'automation'
+    | 'automation_dispatch'
     | 'monitoring'
     | 'notification_dispatch'
     | 'notification_outbox'
@@ -329,6 +355,7 @@ export interface WorkerStatisticsTable {
   retry_count: number;
   role:
     | 'automation'
+    | 'automation_dispatch'
     | 'monitoring'
     | 'notification_dispatch'
     | 'notification_outbox'
@@ -481,7 +508,9 @@ export interface NotificationEventReceiptTable {
 export interface DatabaseSchema {
   alert_evaluation_states: AlertEvaluationStateTable;
   alert_rules: AlertRuleTable;
+  automation_attempts: AutomationAttemptTable;
   automation_executions: AutomationExecutionTable;
+  legacy_automation_executions: Record<string, unknown>;
   automation_rule_versions: AutomationRuleVersionTable;
   automation_rules: AutomationRuleTable;
   billing_accounts: BillingAccountTable;

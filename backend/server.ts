@@ -147,6 +147,24 @@ import {
 import { SqliteWorkLeaseRepository } from './infrastructure/workers/sqlite/sqlite-work-lease-repository.js';
 import { SqliteWorkerStatisticsRepository } from './infrastructure/workers/sqlite/sqlite-worker-statistics-repository.js';
 import { WorkerHost } from './infrastructure/workers/worker-host.js';
+import { AutomationDispatchWorker } from './infrastructure/workers/automation-dispatch-worker.js';
+import { AutomationOutboxWorker, SqliteAutomationWorkRepository } from './infrastructure/workers/automation-worker.js';
+import { DispatchAutomationExecutionUseCase } from './application/use-cases/automation/dispatch-automation-execution/dispatch-automation-execution.use-case.js';
+import { WebhookAutomationActionAdapter } from './infrastructure/automation/adapters/webhook.adapter.js';
+import { N8nAutomationActionAdapter } from './infrastructure/automation/adapters/n8n.adapter.js';
+import { DisabledLegacyServiceReactivationActionAdapter } from './infrastructure/automation/adapters/disabled-legacy-reactivation.adapter.js';
+import { DisabledRouterOsAutomationActionAdapter } from './infrastructure/automation/adapters/disabled-routeros.adapter.js';
+import { SqliteAutomationExecutionRepository } from './infrastructure/database/automation/sqlite/sqlite-automation-execution-repository.js';
+import { SqliteAutomationAttemptRepository } from './infrastructure/database/automation/sqlite/sqlite-automation-attempt-repository.js';
+import { ClientAutomationReaderAdapter } from './infrastructure/automation/facts/client-automation-reader.adapter.js';
+import { ServiceAutomationReaderAdapter } from './infrastructure/automation/facts/service-automation-reader.adapter.js';
+import { BillingAutomationReaderAdapter } from './infrastructure/automation/facts/billing-automation-reader.adapter.js';
+import { ProvisioningAutomationReaderAdapter } from './infrastructure/automation/facts/provisioning-automation-reader.adapter.js';
+import { CompositeAutomationFactsAdapter } from './infrastructure/automation/facts/composite-automation-facts.adapter.js';
+import { SqliteAutomationRuleRepository } from './infrastructure/database/automation/sqlite/sqlite-automation-rule-repository.js';
+import { SqliteAutomationEventReceipt } from './infrastructure/database/automation/sqlite/sqlite-automation-event-receipt.js';
+import { EvaluateDomainEvent } from './application/use-cases/automation/evaluate-domain-event/evaluate-domain-event.use-case.js';
+import { SqliteBillingAccountRepository } from './infrastructure/database/billing/accounts/sqlite/sqlite-billing-account-repository.js';
 
 const shutdownTimeoutMs = 10_000;
 const idGenerator = new UuidV7IdGenerator();
@@ -410,6 +428,65 @@ const notificationWorkerHost = new WorkerHost(
   },
   clock,
 );
+
+const automationWorkerId = `automation-${process.pid}`;
+const automationExecutionRepo = new SqliteAutomationExecutionRepository(sqlite.session);
+const billingAccountRepository = new SqliteBillingAccountRepository(sqlite.session);
+
+const clientAutomationReader = new ClientAutomationReaderAdapter(clientRepository);
+const serviceAutomationReader = new ServiceAutomationReaderAdapter(serviceRepository);
+const billingAutomationReader = new BillingAutomationReaderAdapter(billingAccountRepository, billingInvoiceRepository, billingPaymentRepository, clock);
+const provisioningAutomationReader = new ProvisioningAutomationReaderAdapter(provisioningRepository);
+const compositeAutomationFacts = new CompositeAutomationFactsAdapter(clientAutomationReader, serviceAutomationReader, billingAutomationReader, provisioningAutomationReader);
+
+const evaluateDomainEventUseCase = new EvaluateDomainEvent(
+  new SqliteAutomationRuleRepository(sqlite.session),
+  automationExecutionRepo,
+  new SqliteAutomationEventReceipt(sqlite.session, idGenerator, clock),
+  compositeAutomationFacts,
+  companyContext,
+  idGenerator,
+  clock,
+  {
+    maxAttempts: environment.AUTOMATION_MAX_ATTEMPTS,
+    maxCausalDepth: environment.AUTOMATION_MAX_CAUSAL_DEPTH,
+  }
+);
+
+const automationWorkerHost = new WorkerHost(
+  [
+    new AutomationOutboxWorker(new SqliteAutomationWorkRepository(sqlite.session), evaluateDomainEventUseCase, clock, {
+      maxAttempts: environment.AUTOMATION_MAX_ATTEMPTS,
+    }),
+    new AutomationDispatchWorker(
+      automationExecutionRepo,
+      new DispatchAutomationExecutionUseCase(
+        automationExecutionRepo,
+        new SqliteAutomationAttemptRepository(sqlite.session),
+        [
+          new WebhookAutomationActionAdapter(false),
+          new N8nAutomationActionAdapter(false),
+          new DisabledLegacyServiceReactivationActionAdapter(),
+          new DisabledRouterOsAutomationActionAdapter(),
+        ],
+        idGenerator,
+        clock,
+        { maxAttempts: environment.AUTOMATION_MAX_ATTEMPTS }
+      ),
+      clock,
+      { workerId: automationWorkerId, batchSize: environment.AUTOMATION_WORKER_BATCH_SIZE }
+    ),
+  ],
+  new SqliteWorkLeaseRepository(sqlite.session),
+  new SqliteWorkerStatisticsRepository(sqlite.session),
+  automationWorkerId,
+  {
+    idleDelayMs: environment.AUTOMATION_WORKER_INTERVAL_MS,
+    leaseDurationMs: environment.AUTOMATION_WORKER_LEASE_SECONDS * 1_000,
+    leaseRenewalMs: Math.max(1_000, environment.AUTOMATION_WORKER_LEASE_SECONDS * 500),
+  },
+  clock,
+);
 const clientsController = new ClientsController({
   archiveClient: new ArchiveClient(clientRepository, companyContext, clock),
   createClient: new CreateClient(
@@ -557,6 +634,7 @@ function shutdown(signal: NodeJS.Signals): void {
 
     try {
       if (environment.NOTIFICATION_WORKER_ENABLED) await notificationWorkerHost.stop();
+      if (environment.AUTOMATION_WORKER_ENABLED) await automationWorkerHost.stop();
       await monitoringWorkerHost.stop();
       await sqlite.close();
       logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
@@ -596,9 +674,24 @@ server.listen(environment.PORT, () => {
       });
     });
   }
-  logger.info({
-    action: 'server.started',
-    module: 'server',
-    port: environment.PORT,
+
+  if (environment.AUTOMATION_WORKER_ENABLED) {
+    void automationWorkerHost.start().catch((error: unknown) => {
+      logger.error({
+        action: 'automation.workers.start.failed',
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        module: 'automation',
+      });
+    });
+  }
+
+  void monitoringWorkerHost.start().catch((error: unknown) => {
+    logger.error({
+      action: 'monitoring.workers.start.failed',
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      module: 'monitoring',
+    });
   });
+
+  logger.info({ action: 'server.started', module: 'server', port: environment.PORT });
 });

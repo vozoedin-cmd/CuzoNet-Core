@@ -83,10 +83,10 @@ export class EvolutionApiWhatsAppNotificationChannel implements NotificationChan
       if (response.status >= 200 && response.status <= 299) {
         let providerMessageId: string | undefined;
         try {
-          const json = await response.json();
-          if (json && typeof json === 'object' && 'key' in json && json.key && typeof (json.key as any).id === 'string') {
+          const json = await response.json() as { key?: { id?: string } };
+          if (json?.key?.id && typeof json.key.id === 'string') {
              // Example based on usual Evolution API response: { key: { id: "msg_id" } }
-             providerMessageId = (json.key as any).id;
+             providerMessageId = json.key.id;
           }
         } catch {
           // Ignore invalid JSON on success

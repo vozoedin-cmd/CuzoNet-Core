@@ -1,5 +1,6 @@
 export enum WorkerRole {
   Automation = 'automation',
+  AutomationDispatch = 'automation_dispatch',
   Monitoring = 'monitoring',
   NotificationDispatch = 'notification_dispatch',
   NotificationOutbox = 'notification_outbox',
@@ -10,6 +11,7 @@ export enum WorkerRole {
 export const workerRoles: readonly WorkerRole[] = Object.freeze([
   WorkerRole.Outbox,
   WorkerRole.Automation,
+  WorkerRole.AutomationDispatch,
   WorkerRole.Monitoring,
   WorkerRole.Provisioning,
   WorkerRole.NotificationOutbox,

@@ -108,12 +108,12 @@ export class SqliteAutomationWorkRepository {
   }
 }
 
-export interface AutomationWorkerOptions {
+export interface AutomationOutboxWorkerOptions {
   baseRetryDelayMs?: number;
   maxAttempts?: number;
 }
 
-export class AutomationWorker implements WorkerRoleHandler {
+export class AutomationOutboxWorker implements WorkerRoleHandler {
   public readonly role = WorkerRole.Automation;
   private readonly baseRetryDelayMs: number;
   private readonly maxAttempts: number;
@@ -122,7 +122,7 @@ export class AutomationWorker implements WorkerRoleHandler {
     private readonly work: SqliteAutomationWorkRepository,
     private readonly evaluator: AutomationEventEvaluator,
     private readonly clock: Clock,
-    options: AutomationWorkerOptions = {},
+    options: AutomationOutboxWorkerOptions = {},
   ) {
     this.baseRetryDelayMs = options.baseRetryDelayMs ?? 1_000;
     this.maxAttempts = options.maxAttempts ?? 5;

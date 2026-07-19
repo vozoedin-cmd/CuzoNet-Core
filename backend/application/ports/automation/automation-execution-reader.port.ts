@@ -1,7 +1,5 @@
-import type {
-  AutomationExecutionDto,
-  AutomationExecutionStatus,
-} from '../../dto/automation/automation-execution.dto.js';
+import type { AutomationExecutionDto } from '../../dto/automation/automation-execution.dto.js';
+import type { AutomationExecutionStatus } from '../../../domain/automation/automation-execution.js';
 export interface AutomationExecutionListCriteria {
   companyId: string;
   eventId?: string;

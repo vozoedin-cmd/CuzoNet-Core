@@ -1,23 +1,27 @@
-export type AutomationExecutionStatus =
-  'evaluated_no_match' | 'action_pending' | 'action_requested' | 'action_rejected' | 'failed';
-export interface AutomationActionResultDto {
-  actionRequestKey: string;
-  actionType: 'request_service_reactivation';
-  actionVersion: 1;
-  requestId?: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'unavailable';
-}
+import type { AutomationExecutionStatus } from '../../../domain/automation/automation-execution.js';
+
 export interface AutomationExecutionDto {
-  actionResults: readonly AutomationActionResultDto[];
-  completedAt?: string;
-  contextId: string;
-  errorCode?: string;
-  errorMessage?: string;
+  actionSnapshotJson: string;
+  actionType: string;
+  attemptCount: number;
+  cancelledAt?: string | undefined;
+  companyId: string;
+  completedAt?: string | undefined;
+  createdAt: string;
   eventId: string;
+  eventSnapshotJson: string;
+  eventType: string;
   id: string;
-  matched: boolean;
+  lastErrorCode?: string | undefined;
+  lastErrorMessage?: string | undefined;
+  maxAttempts: number;
+  nextAttemptAt?: string | undefined;
+  processingLeaseUntil?: string | undefined;
+  processingStartedAt?: string | undefined;
+  processingWorkerId?: string | undefined;
+  providerExecutionId?: string | undefined;
   ruleId: string;
-  ruleVersion: number;
-  startedAt: string;
+  startedAt?: string | undefined;
   status: AutomationExecutionStatus;
+  updatedAt: string;
 }

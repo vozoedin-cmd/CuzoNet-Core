@@ -46,12 +46,41 @@ function serializeCondition(node: NormalizedRuleCondition): RuleConditionDefinit
 }
 export function toAutomationRuleDto(rule: AutomationRule): AutomationRuleDto {
   return {
-    actions: rule.actions.map((action) => ({
-      actionType: action.actionType,
-      actionVersion: action.actionVersion,
-      reasonCode: action.reasonCode,
-      targetFactPath: action.targetFactPath.value,
-    })),
+    actions: rule.actions.map((action): ActionDefinitionProps => {
+      if (action.actionType === 'request_service_reactivation') {
+        return {
+          actionType: 'request_service_reactivation',
+          actionVersion: action.actionVersion,
+          reasonCode: action.reasonCode!,
+          targetFactPath: action.targetFactPath!.value,
+        };
+      } else if (action.actionType === 'webhook') {
+        return {
+          actionType: 'webhook',
+          actionVersion: action.actionVersion,
+          configurationReference: action.configurationReference!,
+          payloadTemplate: action.payloadTemplate,
+        };
+      } else if (action.actionType === 'n8n_webhook') {
+        return {
+          actionType: 'n8n_webhook',
+          actionVersion: action.actionVersion,
+          configurationReference: action.configurationReference!,
+          workflowKey: action.workflowKey!,
+          payloadTemplate: action.payloadTemplate,
+        };
+      } else if (action.actionType === 'routeros_operation') {
+        return {
+          actionType: 'routeros_operation',
+          actionVersion: action.actionVersion,
+          operationType: action.operationType!,
+          equipmentId: action.equipmentId!,
+          ...(action.parameters === undefined ? {} : { parameters: action.parameters }),
+        };
+      } else {
+        return { actionType: 'noop', actionVersion: action.actionVersion };
+      }
+    }),
     condition: serializeCondition(rule.condition.definition),
     createdAt: rule.createdAt.toISOString(),
     id: rule.id.value,

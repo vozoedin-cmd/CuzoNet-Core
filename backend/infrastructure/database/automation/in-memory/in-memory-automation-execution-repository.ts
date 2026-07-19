@@ -20,20 +20,25 @@ export class InMemoryAutomationExecutionRepository
   }
   public findUnique(
     companyId: string,
-    ruleId: string,
-    ruleVersion: number,
     eventId: string,
-    contextId: string,
+    ruleId: string,
   ): Promise<AutomationExecutionDto | null> {
     const record = [...this.records.values()].find(
       (candidate) =>
         candidate.companyId === companyId &&
         candidate.execution.ruleId === ruleId &&
-        candidate.execution.ruleVersion === ruleVersion &&
-        candidate.execution.eventId === eventId &&
-        candidate.execution.contextId === contextId,
+        candidate.execution.eventId === eventId,
     );
     return Promise.resolve(record === undefined ? null : structuredClone(record.execution));
+  }
+
+  public claimDue(
+    _workerId: string,
+    _now: Date,
+    _leaseUntil: Date,
+    _limit: number,
+  ): Promise<readonly AutomationExecutionDto[]> {
+    throw new Error('Not implemented in tests');
   }
   public findById(companyId: string, executionId: string): Promise<AutomationExecutionDto | null> {
     const record = this.records.get(`${companyId}:${executionId}`);

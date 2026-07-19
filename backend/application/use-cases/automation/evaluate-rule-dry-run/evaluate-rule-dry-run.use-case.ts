@@ -4,10 +4,10 @@ import { AutomationRuleNotFoundError } from '../../../../domain/automation/error
 import { RuleEvaluator } from '../../../../domain/automation/services/rule-evaluator.js';
 import { EvaluationContext } from '../../../../domain/automation/value-objects/evaluation-context.js';
 export interface EvaluateRuleDryRunResult {
-  actions: readonly {
+    actions: readonly {
     actionType: string;
     actionVersion: number;
-    reasonCode: string;
+    reasonCode: string | undefined;
     targetServiceId: string | null;
   }[];
   matched: boolean;
@@ -36,7 +36,7 @@ export class EvaluateRuleDryRun {
             actionVersion: action.actionVersion,
             reasonCode: action.reasonCode,
             targetServiceId:
-              typeof context.get(action.targetFactPath) === 'string'
+              action.targetFactPath && typeof context.get(action.targetFactPath) === 'string'
                 ? (context.get(action.targetFactPath) as string)
                 : null,
           }))
