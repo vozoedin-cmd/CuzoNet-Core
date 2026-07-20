@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 
+import type { ProvisioningActionAdapter } from './application/ports/provisioning/provisioning-action-adapter.port.js';
+
 import { IncidentAlertingController } from './api/alerting/incident-alerting.controller.js';
 import { createIncidentAlertingRouter } from './api/alerting/incident-alerting.routes.js';
 import { NotificationsController } from './api/notifications/notifications.controller.js';
@@ -27,6 +29,10 @@ import { SqliteProvisioningAttemptRepository } from './infrastructure/database/p
 import { ProvisioningDispatchWorker } from './infrastructure/workers/provisioning-dispatch-worker.js';
 import { ProvisioningAutomationActionAdapter } from './infrastructure/automation/adapters/provisioning-automation-action.adapter.js';
 import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
+import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
+import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
+import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
+import { SystemRouterOsClientFactory } from './infrastructure/provisioning/routeros/system-routeros-client.factory.js';
 import { ProvisioningRetryPolicy } from './domain/provisioning/services/provisioning-retry-policy.js';
 
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
@@ -446,8 +452,53 @@ const notificationWorkerHost = new WorkerHost(
 
 const provisioningRequestRepo = new SqliteProvisioningRequestRepository(sqlite.session);
 const provisioningAttemptRepo = new SqliteProvisioningAttemptRepository(sqlite.session);
-const provisioningActionAdapters = new Map([
-  ['routeros.provision', new DisabledRouterOsProvisioningAdapter()]
+const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
+  ['routeros.provision', new DisabledRouterOsProvisioningAdapter()],
+  [
+    'routeros.simple_queue.create',
+    new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.create',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.simple_queue.update',
+    new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.simple_queue.enable',
+    new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.simple_queue.disable',
+    new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.simple_queue.remove',
+    new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
 ]);
 const provisioningEngineRetryPolicy = new ProvisioningRetryPolicy(environment.PROVISIONING_MAX_ATTEMPTS);
 
