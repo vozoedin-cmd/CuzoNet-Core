@@ -17,6 +17,7 @@ export interface AppDependencies {
   notificationsRouter?: Router;
   plansRouter?: Router;
   provisioningRouter?: Router;
+  provisioningRequestsRouter?: Router;
   servicesRouter?: Router;
 }
 
@@ -70,6 +71,9 @@ export function createApp(dependencies: AppDependencies = {}, config: AppConfig 
   }
   if (dependencies.provisioningRouter !== undefined) {
     apiRouter.use(dependencies.provisioningRouter);
+  }
+  if (dependencies.provisioningRequestsRouter !== undefined) {
+    apiRouter.use(dependencies.provisioningRequestsRouter);
   }
   app.use(apiPrefix, apiRouter);
   app.use(notFoundMiddleware);

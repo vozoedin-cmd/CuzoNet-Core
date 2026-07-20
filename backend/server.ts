@@ -15,6 +15,20 @@ import { createEquipmentRouter } from './api/inventory/equipment.routes.js';
 import { MonitoringController } from './api/monitoring/monitoring.controller.js';
 import { createMonitoringRouter } from './api/monitoring/monitoring.routes.js';
 import { createApp } from './api/http/app.js';
+import { ProvisioningRequestsController } from './api/provisioning/controller/provisioning-requests.controller.js';
+import { createProvisioningRequestsRouter } from './api/provisioning/routes/provisioning-requests.routes.js';
+import { RequestProvisioning } from './application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
+import { DispatchProvisioningRequest } from './application/use-cases/provisioning/dispatch-provisioning-request/dispatch-provisioning-request.use-case.js';
+import { CancelProvisioningRequest } from './application/use-cases/provisioning/cancel-provisioning-request/cancel-provisioning-request.use-case.js';
+import { GetProvisioningRequest } from './application/use-cases/provisioning/get-provisioning-request/get-provisioning-request.use-case.js';
+import { ListProvisioningRequests } from './application/use-cases/provisioning/list-provisioning-requests/list-provisioning-requests.use-case.js';
+import { SqliteProvisioningRequestRepository } from './infrastructure/database/provisioning/sqlite/sqlite-provisioning-request.repository.js';
+import { SqliteProvisioningAttemptRepository } from './infrastructure/database/provisioning/sqlite/sqlite-provisioning-attempt.repository.js';
+import { ProvisioningDispatchWorker } from './infrastructure/workers/provisioning-dispatch-worker.js';
+import { ProvisioningAutomationActionAdapter } from './infrastructure/automation/adapters/provisioning-automation-action.adapter.js';
+import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
+import { ProvisioningRetryPolicy } from './domain/provisioning/services/provisioning-retry-policy.js';
+
 import { ProvisioningController } from './api/provisioning/controller/provisioning.controller.js';
 import { createProvisioningRouter } from './api/provisioning/routes/provisioning.routes.js';
 import { PlansController } from './api/plans/controller/plans.controller.js';
@@ -429,6 +443,59 @@ const notificationWorkerHost = new WorkerHost(
   clock,
 );
 
+
+const provisioningRequestRepo = new SqliteProvisioningRequestRepository(sqlite.session);
+const provisioningAttemptRepo = new SqliteProvisioningAttemptRepository(sqlite.session);
+const provisioningActionAdapters = new Map([
+  ['routeros.provision', new DisabledRouterOsProvisioningAdapter()]
+]);
+const provisioningEngineRetryPolicy = new ProvisioningRetryPolicy(environment.PROVISIONING_MAX_ATTEMPTS);
+
+const provisioningRequestsController = new ProvisioningRequestsController({
+  requestProvisioning: new RequestProvisioning(
+    provisioningRequestRepo,
+    companyContext,
+    idGenerator,
+    environment.PROVISIONING_MAX_ATTEMPTS
+  ),
+  cancelRequest: new CancelProvisioningRequest(
+    provisioningRequestRepo,
+    companyContext,
+    clock
+  ),
+  getRequest: new GetProvisioningRequest(provisioningRequestRepo, companyContext),
+  listRequests: new ListProvisioningRequests(provisioningRequestRepo, companyContext)
+});
+const provisioningRequestsRouter = createProvisioningRequestsRouter(provisioningRequestsController);
+
+const provisioningWorkerId = `provisioning-${process.pid}`;
+const provisioningWorkerHost = new WorkerHost(
+  [
+    new ProvisioningDispatchWorker(
+      provisioningRequestRepo,
+      new DispatchProvisioningRequest(
+        provisioningRequestRepo,
+        provisioningAttemptRepo,
+        provisioningActionAdapters,
+        idGenerator,
+        clock,
+        provisioningEngineRetryPolicy
+      ),
+      clock,
+      { workerId: provisioningWorkerId, batchSize: environment.PROVISIONING_WORKER_BATCH_SIZE }
+    )
+  ],
+  new SqliteWorkLeaseRepository(sqlite.session),
+  new SqliteWorkerStatisticsRepository(sqlite.session),
+  provisioningWorkerId,
+  {
+    idleDelayMs: environment.PROVISIONING_WORKER_INTERVAL_MS,
+    leaseDurationMs: environment.PROVISIONING_WORKER_LEASE_SECONDS * 1000,
+    leaseRenewalMs: Math.max(1000, environment.PROVISIONING_WORKER_LEASE_SECONDS * 500),
+  },
+  clock
+);
+
 const automationWorkerId = `automation-${process.pid}`;
 const automationExecutionRepo = new SqliteAutomationExecutionRepository(sqlite.session);
 const billingAccountRepository = new SqliteBillingAccountRepository(sqlite.session);
@@ -465,6 +532,14 @@ const automationWorkerHost = new WorkerHost(
         new SqliteAutomationAttemptRepository(sqlite.session),
         [
           new WebhookAutomationActionAdapter(false),
+          new ProvisioningAutomationActionAdapter(
+            new RequestProvisioning(
+              provisioningRequestRepo,
+              companyContext,
+              idGenerator,
+              environment.PROVISIONING_MAX_ATTEMPTS
+            )
+          ),
           new N8nAutomationActionAdapter(false),
           new DisabledLegacyServiceReactivationActionAdapter(),
           new DisabledRouterOsAutomationActionAdapter(),
@@ -593,6 +668,7 @@ const server = createServer(
       notificationsRouter,
       plansRouter,
       provisioningRouter,
+        provisioningRequestsRouter,
       servicesRouter,
     },
     {
@@ -635,6 +711,7 @@ function shutdown(signal: NodeJS.Signals): void {
     try {
       if (environment.NOTIFICATION_WORKER_ENABLED) await notificationWorkerHost.stop();
       if (environment.AUTOMATION_WORKER_ENABLED) await automationWorkerHost.stop();
+      if (environment.PROVISIONING_WORKER_ENABLED) await provisioningWorkerHost.stop();
       await monitoringWorkerHost.stop();
       await sqlite.close();
       logger.info({ action: 'server.shutdown.completed', module: 'server', signal });
@@ -672,6 +749,12 @@ server.listen(environment.PORT, () => {
         errorName: error instanceof Error ? error.name : 'UnknownError',
         module: 'notifications',
       });
+    });
+  }
+
+  if (environment.PROVISIONING_WORKER_ENABLED) {
+    void provisioningWorkerHost.start().catch((error) => {
+      logger.error({ action: 'provisioning.workers.start.failed', module: 'provisioning', error }, 'Failed to start provisioning worker');
     });
   }
 

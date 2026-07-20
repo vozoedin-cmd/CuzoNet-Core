@@ -1,6 +1,7 @@
 export enum WorkerRole {
   Automation = 'automation',
   AutomationDispatch = 'automation_dispatch',
+  ProvisioningDispatch = 'provisioning_dispatch',
   Monitoring = 'monitoring',
   NotificationDispatch = 'notification_dispatch',
   NotificationOutbox = 'notification_outbox',

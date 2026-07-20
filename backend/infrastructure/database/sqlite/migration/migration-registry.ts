@@ -18,6 +18,7 @@ import { plansMigration } from '../migrations/0010-plans.js';
 import { workersMigration } from '../migrations/0008-workers.js';
 import { addNotificationDestinationAddressMigration } from '../migrations/0019-add-notification-destination-address.js';
 import { automationExecutionEngineMigration } from '../migrations/0020-automation-execution-engine.js';
+import { provisioningEngineMigration } from '../migrations/0021-provisioning-engine.js';
 import type { Migration } from './migration.js';
 
 export const migrations: readonly Migration[] = Object.freeze([
@@ -41,4 +42,5 @@ export const migrations: readonly Migration[] = Object.freeze([
   notificationEngineMigration,
   addNotificationDestinationAddressMigration,
   automationExecutionEngineMigration,
+  provisioningEngineMigration,
 ]);

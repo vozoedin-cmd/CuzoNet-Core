@@ -340,7 +340,8 @@ export interface WorkLeaseTable {
     | 'notification_dispatch'
     | 'notification_outbox'
     | 'outbox'
-    | 'provisioning';
+    | 'provisioning'
+    | 'provisioning_dispatch';
   work_id: string;
 }
 
@@ -360,7 +361,8 @@ export interface WorkerStatisticsTable {
     | 'notification_dispatch'
     | 'notification_outbox'
     | 'outbox'
-    | 'provisioning';
+    | 'provisioning'
+    | 'provisioning_dispatch';
   skipped_count: number;
   started_at: string;
   stopped_at: Nullable<string>;
@@ -505,6 +507,42 @@ export interface NotificationEventReceiptTable {
   processed_at: string;
   status: 'processed' | 'failed';
 }
+export interface ProvisioningRequestTable {
+  id: string;
+  company_id: string;
+  source_execution_id: Nullable<string>;
+  idempotency_key: string;
+  action_type: string;
+  target_type: string;
+  target_id: string;
+  configuration_reference: Nullable<string>;
+  input_hash: string;
+  input_snapshot_json: string;
+  status: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: Nullable<string>;
+  processing_worker_id: Nullable<string>;
+  processing_started_at: Nullable<string>;
+  completed_at: Nullable<string>;
+  last_error_code: Nullable<string>;
+  last_error_message: Nullable<string>;
+  created_at: string;
+  updated_at: string;
+}
+export interface ProvisioningAttemptTable {
+  id: string;
+  request_id: string;
+  attempt_number: number;
+  worker_id: string;
+  started_at: string;
+  finished_at: Nullable<string>;
+  outcome: string;
+  error_code: Nullable<string>;
+  error_message: Nullable<string>;
+  duration_ms: Nullable<number>;
+  metadata_json: Nullable<string>;
+}
 export interface DatabaseSchema {
   alert_evaluation_states: AlertEvaluationStateTable;
   alert_rules: AlertRuleTable;
@@ -540,6 +578,8 @@ export interface DatabaseSchema {
   notification_event_receipts: NotificationEventReceiptTable;
   notifications: NotificationTable;
   provisioning_operations: ProvisioningOperationTable;
+  provisioning_requests: ProvisioningRequestTable;
+  provisioning_attempts: ProvisioningAttemptTable;
   schema_migrations: SchemaMigrationTable;
   work_leases: WorkLeaseTable;
   worker_statistics: WorkerStatisticsTable;

@@ -79,7 +79,7 @@ describe('Incident Alerting SQLite integration', () => {
       'incident_events',
       'incidents',
     ]);
-    expect(new MigrationRunner(database.connection).currentVersion()).toBe(20);
+    expect(new MigrationRunner(database.connection).currentVersion()).toBe(21);
   });
 
   it('installs default company rules idempotently with recovery windows', async () => {
