@@ -125,14 +125,17 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    return {
-      comment: reply.comment ?? '',
-      disabled: reply.disabled === 'true',
-      id: reply['.id'] ?? '',
-      maxLimit: (reply['max-limit'] as string) ?? '',
-      name: reply.name ?? '',
-      target: reply.target ?? '',
-    };
+    return mapReplyToSimpleQueue(reply);
+  }
+
+  public async listSimpleQueues(): Promise<RouterOsSimpleQueue[]> {
+    const replies = await this.client.print('/queue/simple/print', {
+      attributes: {
+        '.proplist': '.id,name,target,max-limit,disabled,comment',
+      },
+      timeoutMs: this.timeoutMs,
+    });
+    return replies.map(mapReplyToSimpleQueue);
   }
 
   public async removeSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<void> {
@@ -459,14 +462,17 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    return {
-      address: reply.address ?? '',
-      comment: reply.comment ?? '',
-      disabled: reply.disabled === 'true',
-      id: reply['.id'] ?? '',
-      list: reply.list ?? '',
-      timeout: (reply.timeout as string) ?? '',
-    };
+    return mapReplyToAddressListEntry(reply);
+  }
+
+  public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
+    const replies = await this.client.print('/ip/firewall/address-list/print', {
+      attributes: {
+        '.proplist': '.id,list,address,disabled,comment,timeout',
+      },
+      timeoutMs: this.timeoutMs,
+    });
+    return replies.map(mapReplyToAddressListEntry);
   }
 
   public async removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
@@ -894,6 +900,28 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       timeoutMs: this.timeoutMs,
     });
   }
+}
+
+function mapReplyToSimpleQueue(reply: RouterOSRecord): RouterOsSimpleQueue {
+  return {
+    comment: reply.comment ?? '',
+    disabled: reply.disabled === 'true',
+    id: reply['.id'] ?? '',
+    maxLimit: reply['max-limit'] ?? '',
+    name: reply.name ?? '',
+    target: reply.target ?? '',
+  };
+}
+
+function mapReplyToAddressListEntry(reply: RouterOSRecord): RouterOsAddressListEntry {
+  return {
+    address: reply.address ?? '',
+    comment: reply.comment ?? '',
+    disabled: reply.disabled === 'true',
+    id: reply['.id'] ?? '',
+    list: reply.list ?? '',
+    timeout: reply.timeout ?? '',
+  };
 }
 
 const FILTER_RULE_PROPLIST =

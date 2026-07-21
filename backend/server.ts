@@ -19,6 +19,11 @@ import { createMonitoringRouter } from './api/monitoring/monitoring.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningRequestsController } from './api/provisioning/controller/provisioning-requests.controller.js';
 import { createProvisioningRequestsRouter } from './api/provisioning/routes/provisioning-requests.routes.js';
+import { SynchronizationController } from './api/synchronization/controller/synchronization.controller.js';
+import { createSynchronizationRouter } from './api/synchronization/routes/synchronization.routes.js';
+import { GenerateReconciliationPlan } from './application/use-cases/synchronization/generate-reconciliation-plan.use-case.js';
+import { ProvisioningHistoryDesiredStateRepository } from './infrastructure/synchronization/provisioning-history-desired-state.repository.js';
+import { RouterOsActualStateReader } from './infrastructure/synchronization/routeros-actual-state.reader.js';
 import { RequestProvisioning } from './application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
 import { DispatchProvisioningRequest } from './application/use-cases/provisioning/dispatch-provisioning-request/dispatch-provisioning-request.use-case.js';
 import { CancelProvisioningRequest } from './application/use-cases/provisioning/cancel-provisioning-request/cancel-provisioning-request.use-case.js';
@@ -858,6 +863,19 @@ const provisioningRequestsController = new ProvisioningRequestsController({
 });
 const provisioningRequestsRouter = createProvisioningRequestsRouter(provisioningRequestsController);
 
+const generateReconciliationPlan = new GenerateReconciliationPlan(
+  new ProvisioningHistoryDesiredStateRepository(provisioningRequestRepo),
+  new RouterOsActualStateReader(
+    new EnvironmentRouterConnectionResolver(),
+    new EnvironmentSecretProvider(),
+    new SystemRouterOsClientFactory(),
+  ),
+  companyContext,
+  clock,
+);
+const synchronizationController = new SynchronizationController(generateReconciliationPlan);
+const synchronizationRouter = createSynchronizationRouter(synchronizationController);
+
 const provisioningWorkerId = `provisioning-${process.pid}`;
 const provisioningWorkerHost = new WorkerHost(
   [
@@ -1070,8 +1088,9 @@ const server = createServer(
       notificationsRouter,
       plansRouter,
       provisioningRouter,
-        provisioningRequestsRouter,
+      provisioningRequestsRouter,
       servicesRouter,
+      synchronizationRouter,
     },
     {
       apiPrefix: environment.API_PREFIX,

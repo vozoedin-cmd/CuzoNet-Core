@@ -73,6 +73,15 @@ describe('FakeRouterOsClient address list entries', () => {
     expect(client.addressListEntries[0]?.list).to.equal('trusted-ips');
   });
 
+  it('lists every created entry', async () => {
+    await client.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
+    await client.createAddressListEntry({ address: '192.168.1.11', list: 'trusted-ips' });
+
+    const listed = await client.listAddressListEntries();
+
+    expect(listed.map((e) => `${e.list}:${e.address}`)).to.deep.equal(['blocked-ips:192.168.1.10', 'trusted-ips:192.168.1.11']);
+  });
+
   it('throws once the client is closed', async () => {
     await client.close();
 
@@ -82,5 +91,6 @@ describe('FakeRouterOsClient address list entries', () => {
     await expect(client.findAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' })).rejects.toThrow(
       'Client is closed',
     );
+    await expect(client.listAddressListEntries()).rejects.toThrow('Client is closed');
   });
 });

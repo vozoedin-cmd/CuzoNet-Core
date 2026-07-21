@@ -344,6 +344,8 @@ export interface RouterOsClientPort {
   disableSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<void>;
   enableSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<void>;
   findSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<RouterOsSimpleQueue | null>;
+  /** Full listing of all simple queues, used by the Synchronization Engine to detect queues CuzoNet never provisioned. */
+  listSimpleQueues(): Promise<RouterOsSimpleQueue[]>;
   removeSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<void>;
   updateSimpleQueue(reference: RouterOsSimpleQueueReference, data: RouterOsSimpleQueueUpdateData): Promise<void>;
 
@@ -365,6 +367,8 @@ export interface RouterOsClientPort {
   disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
   enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
   findAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<RouterOsAddressListEntry | null>;
+  /** Full listing of all address-list entries, used by the Synchronization Engine to detect entries CuzoNet never provisioned. */
+  listAddressListEntries(): Promise<RouterOsAddressListEntry[]>;
   removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
   updateAddressListEntry(
     reference: RouterOsAddressListEntryReference,

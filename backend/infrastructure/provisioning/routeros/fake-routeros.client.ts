@@ -104,6 +104,13 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     return queue ?? null;
   }
 
+  public async listSimpleQueues(): Promise<RouterOsSimpleQueue[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.queues];
+  }
+
   public async removeSimpleQueue(reference: RouterOsSimpleQueueReference): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
@@ -375,6 +382,13 @@ export class FakeRouterOsClient implements RouterOsClientPort {
           e.address === reference.address),
     );
     return entry ?? null;
+  }
+
+  public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.addressListEntries];
   }
 
   public async removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
