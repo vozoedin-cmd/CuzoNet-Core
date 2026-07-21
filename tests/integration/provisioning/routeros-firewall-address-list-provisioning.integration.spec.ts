@@ -6,8 +6,10 @@ import type { ProvisioningActionAdapter } from '../../../backend/application/por
 import type { RouterConnectionResolverPort } from '../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
 import type { SecretProviderPort } from '../../../backend/application/ports/provisioning/routeros/secret-provider.port.js';
 import { ProvisioningRetryPolicy } from '../../../backend/domain/provisioning/services/provisioning-retry-policy.js';
+import type { ProvisioningRequestDomainEvent } from '../../../backend/domain/provisioning/events/provisioning-request-domain-event.js';
 import { InMemoryProvisioningAttemptRepository } from '../../../backend/infrastructure/database/provisioning/in-memory/in-memory-provisioning-attempt.repository.js';
 import { InMemoryProvisioningRequestRepository } from '../../../backend/infrastructure/database/provisioning/in-memory/in-memory-provisioning-request.repository.js';
+import { InMemoryOutbox } from '../../../backend/infrastructure/events/in-memory-outbox.js';
 import { UuidV7IdGenerator } from '../../../backend/infrastructure/identity/uuid-v7-id-generator.js';
 import { RouterOsFirewallAddressListProvisioningAdapter } from '../../../backend/infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
 import { FakeRouterOsClient } from '../../../backend/infrastructure/provisioning/routeros/fake-routeros.client.js';
@@ -20,6 +22,7 @@ const clock: Clock = { now: () => new Date('2026-07-20T12:00:00.000Z') };
 describe('RouterOS Firewall Address List provisioning integration with the Provisioning Engine', () => {
   let requestRepo: InMemoryProvisioningRequestRepository;
   let attemptRepo: InMemoryProvisioningAttemptRepository;
+  let outbox: InMemoryOutbox<ProvisioningRequestDomainEvent>;
   let fakeClient: FakeRouterOsClient;
   let requestProvisioning: RequestProvisioning;
   let dispatch: DispatchProvisioningRequest;
@@ -27,6 +30,7 @@ describe('RouterOS Firewall Address List provisioning integration with the Provi
   beforeEach(() => {
     requestRepo = new InMemoryProvisioningRequestRepository();
     attemptRepo = new InMemoryProvisioningAttemptRepository();
+    outbox = new InMemoryOutbox<ProvisioningRequestDomainEvent>();
     fakeClient = new FakeRouterOsClient();
 
     const resolver: RouterConnectionResolverPort = {
@@ -68,7 +72,14 @@ describe('RouterOS Firewall Address List provisioning integration with the Provi
       ],
     ]);
 
-    requestProvisioning = new RequestProvisioning(requestRepo, companyContext, new UuidV7IdGenerator(), 3);
+    requestProvisioning = new RequestProvisioning(
+      requestRepo,
+      companyContext,
+      new UuidV7IdGenerator(),
+      outbox,
+      clock,
+      3,
+    );
     dispatch = new DispatchProvisioningRequest(
       requestRepo,
       attemptRepo,
@@ -76,6 +87,7 @@ describe('RouterOS Firewall Address List provisioning integration with the Provi
       new UuidV7IdGenerator(),
       clock,
       new ProvisioningRetryPolicy(3),
+      outbox,
     );
   });
 

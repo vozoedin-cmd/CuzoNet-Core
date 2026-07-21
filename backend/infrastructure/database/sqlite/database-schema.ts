@@ -341,7 +341,8 @@ export interface WorkLeaseTable {
     | 'notification_outbox'
     | 'outbox'
     | 'provisioning'
-    | 'provisioning_dispatch';
+    | 'provisioning_dispatch'
+    | 'provisioning_event_dispatch';
   work_id: string;
 }
 
@@ -362,7 +363,8 @@ export interface WorkerStatisticsTable {
     | 'notification_outbox'
     | 'outbox'
     | 'provisioning'
-    | 'provisioning_dispatch';
+    | 'provisioning_dispatch'
+    | 'provisioning_event_dispatch';
   skipped_count: number;
   started_at: string;
   stopped_at: Nullable<string>;

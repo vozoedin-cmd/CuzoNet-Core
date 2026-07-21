@@ -1,19 +1,24 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { RequestProvisioning } from '../../../../backend/application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
 import { InMemoryProvisioningRequestRepository } from '../../../../backend/infrastructure/database/provisioning/in-memory/in-memory-provisioning-request.repository.js';
+import { InMemoryOutbox } from '../../../../backend/infrastructure/events/in-memory-outbox.js';
 import { ProvisioningIdempotencyConflictError } from '../../../../backend/domain/provisioning/errors/provisioning-engine.error.js';
+import type { ProvisioningRequestDomainEvent } from '../../../../backend/domain/provisioning/events/provisioning-request-domain-event.js';
 
 describe('RequestProvisioning', () => {
   let repository: InMemoryProvisioningRequestRepository;
+  let outbox: InMemoryOutbox<ProvisioningRequestDomainEvent>;
   let useCase: RequestProvisioning;
   const companyContext = { getCompanyId: () => 'company-1' };
+  const clock = { now: () => new Date('2026-07-20T12:00:00.000Z') };
   let reqId = 1;
   const idGenerator = { generate: () => `req-${reqId++}` };
 
   beforeEach(() => {
     reqId = 1;
     repository = new InMemoryProvisioningRequestRepository();
-    useCase = new RequestProvisioning(repository, companyContext, idGenerator, 5);
+    outbox = new InMemoryOutbox<ProvisioningRequestDomainEvent>();
+    useCase = new RequestProvisioning(repository, companyContext, idGenerator, outbox, clock, 5);
   });
 
   it('should create and save a new request', async () => {

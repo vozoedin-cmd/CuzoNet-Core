@@ -27,12 +27,18 @@ import { ListProvisioningRequests } from './application/use-cases/provisioning/l
 import { SqliteProvisioningRequestRepository } from './infrastructure/database/provisioning/sqlite/sqlite-provisioning-request.repository.js';
 import { SqliteProvisioningAttemptRepository } from './infrastructure/database/provisioning/sqlite/sqlite-provisioning-attempt.repository.js';
 import { ProvisioningDispatchWorker } from './infrastructure/workers/provisioning-dispatch-worker.js';
+import {
+  ProvisioningEventDispatcher,
+  SqliteProvisioningEventWorkRepository,
+} from './infrastructure/workers/provisioning-event-dispatcher.js';
+import { LoggingProvisioningEventPublisher } from './infrastructure/provisioning/events/logging-provisioning-event.publisher.js';
 import { ProvisioningAutomationActionAdapter } from './infrastructure/automation/adapters/provisioning-automation-action.adapter.js';
 import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
 import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
 import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
 import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
+import { PinoProvisioningEventLogger } from './infrastructure/provisioning/logging/provisioning-event.logger.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
 import { SystemRouterOsClientFactory } from './infrastructure/provisioning/routeros/system-routeros-client.factory.js';
@@ -213,6 +219,7 @@ new DatabaseHealthChecker(sqlite.connection).assertHealthy();
 const companyContext: CompanyContext = new SqliteSingleCompanyContext(companyId);
 const unitOfWork = new SqliteUnitOfWork(sqlite.session);
 const outbox = new SqliteOutboxRepository(sqlite.session);
+const provisioningEventLogger = new PinoProvisioningEventLogger();
 const clientRepository = new SqliteClientRepository(sqlite.session, idGenerator);
 const planRepository = new SqlitePlanRepository(sqlite.session);
 const planReader = new SqlitePlanReader(sqlite.session);
@@ -647,7 +654,10 @@ const provisioningRequestsController = new ProvisioningRequestsController({
     provisioningRequestRepo,
     companyContext,
     idGenerator,
-    environment.PROVISIONING_MAX_ATTEMPTS
+    outbox,
+    clock,
+    environment.PROVISIONING_MAX_ATTEMPTS,
+    provisioningEventLogger
   ),
   cancelRequest: new CancelProvisioningRequest(
     provisioningRequestRepo,
@@ -670,10 +680,19 @@ const provisioningWorkerHost = new WorkerHost(
         provisioningActionAdapters,
         idGenerator,
         clock,
-        provisioningEngineRetryPolicy
+        provisioningEngineRetryPolicy,
+        outbox,
+        provisioningEventLogger
       ),
       clock,
       { workerId: provisioningWorkerId, batchSize: environment.PROVISIONING_WORKER_BATCH_SIZE }
+    ),
+    new ProvisioningEventDispatcher(
+      new SqliteProvisioningEventWorkRepository(sqlite.session),
+      new LoggingProvisioningEventPublisher(),
+      clock,
+      {},
+      provisioningEventLogger
     )
   ],
   new SqliteWorkLeaseRepository(sqlite.session),
@@ -728,7 +747,10 @@ const automationWorkerHost = new WorkerHost(
               provisioningRequestRepo,
               companyContext,
               idGenerator,
-              environment.PROVISIONING_MAX_ATTEMPTS
+              outbox,
+              clock,
+              environment.PROVISIONING_MAX_ATTEMPTS,
+              provisioningEventLogger
             )
           ),
           new N8nAutomationActionAdapter(false),

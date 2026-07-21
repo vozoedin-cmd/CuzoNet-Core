@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { SqliteDatabaseSession } from '../../../backend/infrastructure/database/sqlite/sqlite-database-session.js';
 import { SqliteProvisioningRequestRepository } from '../../../backend/infrastructure/database/provisioning/sqlite/sqlite-provisioning-request.repository.js';
 import { RequestProvisioning } from '../../../backend/application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
+import { InMemoryOutbox } from '../../../backend/infrastructure/events/in-memory-outbox.js';
+import type { ProvisioningRequestDomainEvent } from '../../../backend/domain/provisioning/events/provisioning-request-domain-event.js';
 import { ProvisioningIdempotencyConflictError } from '../../../backend/domain/provisioning/errors/provisioning-engine.error.js';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -60,9 +62,11 @@ describe('Provisioning Engine SQLite Concurrency', () => {
 
     repository = new SqliteProvisioningRequestRepository(session);
     useCase = new RequestProvisioning(
-      repository, 
-      { getCompanyId: () => 'company-1' }, 
-      { generate: () => randomUUID() }, 
+      repository,
+      { getCompanyId: () => 'company-1' },
+      { generate: () => randomUUID() },
+      new InMemoryOutbox<ProvisioningRequestDomainEvent>(),
+      { now: () => new Date() },
       5
     );
   });

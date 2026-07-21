@@ -1,5 +1,5 @@
 import type { ProvisioningDomainEvent } from '../../../domain/provisioning/provisioning-operation.js';
 
-export interface OutboxPort {
-  append(events: readonly ProvisioningDomainEvent[]): Promise<void>;
+export interface OutboxPort<TEvent = ProvisioningDomainEvent> {
+  append(events: readonly TEvent[]): Promise<void>;
 }

@@ -1,17 +1,20 @@
 import type { Clock } from '../../application/ports/clock.port.js';
 import { automationEventTypes } from '../../domain/automation/value-objects/event-trigger.js';
+import { provisioningConsumableEventTypes } from '../../domain/provisioning/events/provisioning-event-types.js';
 import type { SqliteDatabaseSession } from '../database/sqlite/sqlite-database-session.js';
 import type { WorkerExecutionContext, WorkerRoleHandler } from './worker-contracts.js';
 import { WorkerRole } from './worker-role.js';
 
 const automationConsumer = 'automation';
 const notificationConsumer = 'notifications';
+const provisioningEventsConsumer = 'provisioning-events';
 const supportedAutomationEvents = new Set<string>(automationEventTypes);
 const supportedNotificationEvents = new Set<string>([
   'IncidentOpened.v1',
   'IncidentAcknowledged.v1',
   'IncidentResolved.v1',
 ]);
+const supportedProvisioningEvents = new Set<string>(provisioningConsumableEventTypes);
 
 export interface OutboxWorkItem {
   eventId: string;
@@ -46,6 +49,7 @@ export class SqliteOutboxWorkRepository {
         const consumers: string[] = [];
         if (supportedAutomationEvents.has(event.event_type)) consumers.push(automationConsumer);
         if (supportedNotificationEvents.has(event.event_type)) consumers.push(notificationConsumer);
+        if (supportedProvisioningEvents.has(event.event_type)) consumers.push(provisioningEventsConsumer);
         if (consumers.length > 0) {
           await database
             .insertInto('event_deliveries')

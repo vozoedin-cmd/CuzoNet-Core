@@ -6,8 +6,10 @@ import type { ProvisioningActionAdapter } from '../../../backend/application/por
 import type { RouterConnectionResolverPort } from '../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
 import type { SecretProviderPort } from '../../../backend/application/ports/provisioning/routeros/secret-provider.port.js';
 import { ProvisioningRetryPolicy } from '../../../backend/domain/provisioning/services/provisioning-retry-policy.js';
+import type { ProvisioningRequestDomainEvent } from '../../../backend/domain/provisioning/events/provisioning-request-domain-event.js';
 import { InMemoryProvisioningAttemptRepository } from '../../../backend/infrastructure/database/provisioning/in-memory/in-memory-provisioning-attempt.repository.js';
 import { InMemoryProvisioningRequestRepository } from '../../../backend/infrastructure/database/provisioning/in-memory/in-memory-provisioning-request.repository.js';
+import { InMemoryOutbox } from '../../../backend/infrastructure/events/in-memory-outbox.js';
 import { UuidV7IdGenerator } from '../../../backend/infrastructure/identity/uuid-v7-id-generator.js';
 import { RouterOsHotspotProvisioningAdapter } from '../../../backend/infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
 import { FakeRouterOsClient } from '../../../backend/infrastructure/provisioning/routeros/fake-routeros.client.js';
@@ -32,6 +34,7 @@ const clock: Clock = { now: () => new Date('2026-07-20T12:00:00.000Z') };
 describe('RouterOS Hotspot provisioning integration with the Provisioning Engine', () => {
   let requestRepo: InMemoryProvisioningRequestRepository;
   let attemptRepo: InMemoryProvisioningAttemptRepository;
+  let outbox: InMemoryOutbox<ProvisioningRequestDomainEvent>;
   let fakeClient: FakeRouterOsClient;
   let requestProvisioning: RequestProvisioning;
   let dispatch: DispatchProvisioningRequest;
@@ -39,6 +42,7 @@ describe('RouterOS Hotspot provisioning integration with the Provisioning Engine
   beforeEach(async () => {
     requestRepo = new InMemoryProvisioningRequestRepository();
     attemptRepo = new InMemoryProvisioningAttemptRepository();
+    outbox = new InMemoryOutbox<ProvisioningRequestDomainEvent>();
     fakeClient = new FakeRouterOsClient();
     await fakeClient.createHotspotUser({ name: 'cliente-1', password: 'pass123', profile: 'default' });
 
@@ -87,7 +91,14 @@ describe('RouterOS Hotspot provisioning integration with the Provisioning Engine
       ],
     ]);
 
-    requestProvisioning = new RequestProvisioning(requestRepo, companyContext, new UuidV7IdGenerator(), 3);
+    requestProvisioning = new RequestProvisioning(
+      requestRepo,
+      companyContext,
+      new UuidV7IdGenerator(),
+      outbox,
+      clock,
+      3,
+    );
     dispatch = new DispatchProvisioningRequest(
       requestRepo,
       attemptRepo,
@@ -95,6 +106,7 @@ describe('RouterOS Hotspot provisioning integration with the Provisioning Engine
       new UuidV7IdGenerator(),
       clock,
       new ProvisioningRetryPolicy(3),
+      outbox,
     );
   });
 
@@ -129,6 +141,17 @@ describe('RouterOS Hotspot provisioning integration with the Provisioning Engine
 
     const provisionedUser = fakeClient.hotspotUsers.find((user) => user.name === 'cliente-2');
     expect(provisionedUser?.password).to.equal('nueva-clave-123'); // Router got the real secret via SecretProviderPort
+
+    const eventTypes = outbox.events().map((event) => event.eventType);
+    expect(eventTypes).to.deep.equal(['ProvisioningRequested.v1', 'ProvisioningSucceeded.v1']);
+    for (const event of outbox.events()) {
+      expect(event.payload.requestId).to.equal(created.id);
+      expect(event.payload.routerId).to.equal('router-1');
+      expect(event.payload.actionType).to.equal('routeros.hotspot.user.create');
+      expect(event.payload.action).to.equal('create');
+      expect(event.payload.resourceType).to.equal('routeros.hotspot.user');
+      expect(JSON.stringify(event.payload)).not.to.include('nueva-clave-123'); // Never leaks the resolved secret
+    }
   });
 
   it('submits idempotently, dispatches through the real adapter chain and completes successfully', async () => {
