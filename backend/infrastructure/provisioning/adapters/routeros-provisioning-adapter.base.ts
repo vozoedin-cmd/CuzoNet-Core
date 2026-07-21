@@ -75,6 +75,7 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
       module: 'provisioning',
       provisioningId: input.requestId,
       routerId: command.routerId,
+      ...this.additionalLogFields(command),
     };
 
     const profile = await this.resolveConnection(input.companyId, command.routerId);
@@ -252,4 +253,9 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
 
   /** Key used to report the resource reference in the success metadata (e.g. 'queueReference', 'secretReference'). */
   protected abstract readonly referenceMetadataKey: string;
+
+  /** Optional adapter-specific fields to enrich structured logs (e.g. addressList/address for Firewall). Never secrets. */
+  protected additionalLogFields(_command: TCommand): Record<string, unknown> {
+    return {};
+  }
 }

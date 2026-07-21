@@ -12,6 +12,10 @@ import type {
   RouterOsHotspotUserCreateData,
   RouterOsHotspotUserReference,
   RouterOsHotspotUserUpdateData,
+  RouterOsAddressListEntry,
+  RouterOsAddressListEntryCreateData,
+  RouterOsAddressListEntryReference,
+  RouterOsAddressListEntryUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 
 export class FakeRouterOsClient implements RouterOsClientPort {
@@ -19,6 +23,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public queues: RouterOsSimpleQueue[] = [];
   public secrets: RouterOsPppoeSecret[] = [];
   public hotspotUsers: RouterOsHotspotUser[] = [];
+  public addressListEntries: RouterOsAddressListEntry[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -292,5 +297,94 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.sharedUsers !== undefined ? { sharedUsers: data.sharedUsers } : {}),
     };
     this.hotspotUsers[index] = userData;
+  }
+
+  public async createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entryData: RouterOsAddressListEntry = {
+      address: entry.address,
+      ...(entry.comment !== undefined ? { comment: entry.comment } : {}),
+      disabled: entry.disabled ?? false,
+      id: `*${this.nextId++}`,
+      list: entry.list,
+      ...(entry.timeout !== undefined ? { timeout: entry.timeout } : {}),
+    };
+    this.addressListEntries.push(entryData);
+  }
+
+  public async disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) {
+      return;
+    }
+    const index = this.addressListEntries.findIndex((e) => e.id === entry.id);
+    this.addressListEntries[index] = { ...entry, disabled: true };
+  }
+
+  public async enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) {
+      return;
+    }
+    const index = this.addressListEntries.findIndex((e) => e.id === entry.id);
+    this.addressListEntries[index] = { ...entry, disabled: false };
+  }
+
+  public async findAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<RouterOsAddressListEntry | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entry = this.addressListEntries.find(
+      (e) =>
+        (reference.id !== undefined && e.id === reference.id) ||
+        (reference.id === undefined &&
+          reference.list !== undefined &&
+          reference.address !== undefined &&
+          e.list === reference.list &&
+          e.address === reference.address),
+    );
+    return entry ?? null;
+  }
+
+  public async removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) {
+      return;
+    }
+    this.addressListEntries = this.addressListEntries.filter((e) => e.id !== entry.id);
+  }
+
+  public async updateAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+    data: RouterOsAddressListEntryUpdateData,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) {
+      return;
+    }
+    const index = this.addressListEntries.findIndex((e) => e.id === entry.id);
+    const entryData: RouterOsAddressListEntry = {
+      ...entry,
+      ...(data.comment !== undefined ? { comment: data.comment } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.timeout !== undefined ? { timeout: data.timeout } : {}),
+    };
+    this.addressListEntries[index] = entryData;
   }
 }

@@ -32,6 +32,7 @@ import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioni
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
 import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
 import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
+import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
 import { SystemRouterOsClientFactory } from './infrastructure/provisioning/routeros/system-routeros-client.factory.js';
@@ -588,6 +589,51 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.hotspot.user.remove',
     new RouterOsHotspotProvisioningAdapter(
       'routeros.hotspot.user.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.address-list.add',
+    new RouterOsFirewallAddressListProvisioningAdapter(
+      'routeros.firewall.address-list.add',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.address-list.update',
+    new RouterOsFirewallAddressListProvisioningAdapter(
+      'routeros.firewall.address-list.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.address-list.enable',
+    new RouterOsFirewallAddressListProvisioningAdapter(
+      'routeros.firewall.address-list.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.address-list.disable',
+    new RouterOsFirewallAddressListProvisioningAdapter(
+      'routeros.firewall.address-list.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.address-list.remove',
+    new RouterOsFirewallAddressListProvisioningAdapter(
+      'routeros.firewall.address-list.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

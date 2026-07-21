@@ -15,6 +15,10 @@ import type {
   RouterOsHotspotUserCreateData,
   RouterOsHotspotUserReference,
   RouterOsHotspotUserUpdateData,
+  RouterOsAddressListEntry,
+  RouterOsAddressListEntryCreateData,
+  RouterOsAddressListEntryReference,
+  RouterOsAddressListEntryUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 
 export class LibraryRouterOsClient implements RouterOsClientPort {
@@ -371,6 +375,106 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (Object.keys(attributes).length === 1) return;
 
     await this.client.execute('/ip/hotspot/user/set', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void> {
+    const attributes: Record<string, string> = {
+      address: entry.address,
+      list: entry.list,
+    };
+    if (entry.comment !== undefined) attributes.comment = entry.comment;
+    if (entry.timeout !== undefined) attributes.timeout = entry.timeout;
+    if (entry.disabled !== undefined) attributes.disabled = entry.disabled ? 'yes' : 'no';
+
+    await this.client.execute('/ip/firewall/address-list/add', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) return;
+
+    await this.client.execute('/ip/firewall/address-list/disable', {
+      attributes: { numbers: entry.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) return;
+
+    await this.client.execute('/ip/firewall/address-list/enable', {
+      attributes: { numbers: entry.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<RouterOsAddressListEntry | null> {
+    let queries: string[];
+    if (reference.id !== undefined) {
+      queries = [`?.id=${reference.id}`];
+    } else if (reference.list !== undefined && reference.address !== undefined) {
+      queries = [`?list=${reference.list}`, `?address=${reference.address}`];
+    } else {
+      return null;
+    }
+
+    const replies = await this.client.print('/ip/firewall/address-list/print', {
+      attributes: {
+        '.proplist': '.id,list,address,disabled,comment,timeout',
+      },
+      queries,
+      timeoutMs: this.timeoutMs,
+    });
+
+    const reply = replies[0];
+    if (!reply) {
+      return null;
+    }
+
+    return {
+      address: reply.address ?? '',
+      comment: reply.comment ?? '',
+      disabled: reply.disabled === 'true',
+      id: reply['.id'] ?? '',
+      list: reply.list ?? '',
+      timeout: (reply.timeout as string) ?? '',
+    };
+  }
+
+  public async removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) return;
+
+    await this.client.execute('/ip/firewall/address-list/remove', {
+      attributes: { numbers: entry.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updateAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+    data: RouterOsAddressListEntryUpdateData,
+  ): Promise<void> {
+    const entry = await this.findAddressListEntry(reference);
+    if (!entry) return;
+
+    const attributes: Record<string, string> = { numbers: entry.id };
+    if (data.comment !== undefined) attributes.comment = data.comment;
+    if (data.timeout !== undefined) attributes.timeout = data.timeout;
+    if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
+
+    if (Object.keys(attributes).length === 1) return;
+
+    await this.client.execute('/ip/firewall/address-list/set', {
       attributes,
       timeoutMs: this.timeoutMs,
     });

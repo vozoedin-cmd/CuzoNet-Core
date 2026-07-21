@@ -104,6 +104,35 @@ export interface RouterOsHotspotUserUpdateData {
   readonly sharedUsers?: number;
 }
 
+export interface RouterOsAddressListEntryReference {
+  readonly address?: string;
+  readonly id?: string;
+  readonly list?: string;
+}
+
+export interface RouterOsAddressListEntry {
+  readonly address: string;
+  readonly comment?: string;
+  readonly disabled: boolean;
+  readonly id: string;
+  readonly list: string;
+  readonly timeout?: string;
+}
+
+export interface RouterOsAddressListEntryCreateData {
+  readonly address: string;
+  readonly comment?: string;
+  readonly disabled?: boolean;
+  readonly list: string;
+  readonly timeout?: string;
+}
+
+export interface RouterOsAddressListEntryUpdateData {
+  readonly comment?: string;
+  readonly disabled?: boolean;
+  readonly timeout?: string;
+}
+
 export interface RouterOsClientPort {
   close(): Promise<void>;
 
@@ -127,6 +156,16 @@ export interface RouterOsClientPort {
   findHotspotUser(reference: RouterOsHotspotUserReference): Promise<RouterOsHotspotUser | null>;
   removeHotspotUser(reference: RouterOsHotspotUserReference): Promise<void>;
   updateHotspotUser(reference: RouterOsHotspotUserReference, data: RouterOsHotspotUserUpdateData): Promise<void>;
+
+  createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void>;
+  disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
+  enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
+  findAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<RouterOsAddressListEntry | null>;
+  removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
+  updateAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+    data: RouterOsAddressListEntryUpdateData,
+  ): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {
