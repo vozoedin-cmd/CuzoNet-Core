@@ -70,6 +70,12 @@ export const environmentSchema = z.object({
   NOTIFICATION_WHATSAPP_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
   NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH: z.coerce.number().int().min(1).max(65536).default(4096),
   SYSTEM_ACTOR_ID: z.string().trim().min(1).default('system-temporary-actor'),
+  PROVISIONING_WEBHOOK_ENABLED: booleanStringSchema.default(false),
+  PROVISIONING_WEBHOOK_URLS: z.string().trim().min(1).optional(),
+  PROVISIONING_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  PROVISIONING_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  PROVISIONING_WEBHOOK_ALLOW_HTTP: booleanStringSchema.default(false),
+  PROVISIONING_WEBHOOK_HMAC_SECRET_REFERENCE: z.string().trim().min(1).optional(),
 });
 
 const parsedEnvironment = environmentSchema.safeParse({
@@ -120,6 +126,12 @@ const parsedEnvironment = environmentSchema.safeParse({
   NOTIFICATION_WHATSAPP_TIMEOUT_MS: process.env.NOTIFICATION_WHATSAPP_TIMEOUT_MS,
   NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH: process.env.NOTIFICATION_WHATSAPP_MAX_TEXT_LENGTH,
   SYSTEM_ACTOR_ID: process.env.SYSTEM_ACTOR_ID,
+  PROVISIONING_WEBHOOK_ENABLED: process.env.PROVISIONING_WEBHOOK_ENABLED,
+  PROVISIONING_WEBHOOK_URLS: process.env.PROVISIONING_WEBHOOK_URLS,
+  PROVISIONING_WEBHOOK_TIMEOUT_MS: process.env.PROVISIONING_WEBHOOK_TIMEOUT_MS,
+  PROVISIONING_WEBHOOK_MAX_ATTEMPTS: process.env.PROVISIONING_WEBHOOK_MAX_ATTEMPTS,
+  PROVISIONING_WEBHOOK_ALLOW_HTTP: process.env.PROVISIONING_WEBHOOK_ALLOW_HTTP,
+  PROVISIONING_WEBHOOK_HMAC_SECRET_REFERENCE: process.env.PROVISIONING_WEBHOOK_HMAC_SECRET_REFERENCE,
 });
 
 if (!parsedEnvironment.success) {

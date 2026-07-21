@@ -32,6 +32,8 @@ import {
   SqliteProvisioningEventWorkRepository,
 } from './infrastructure/workers/provisioning-event-dispatcher.js';
 import { LoggingProvisioningEventPublisher } from './infrastructure/provisioning/events/logging-provisioning-event.publisher.js';
+import { WebhookProvisioningEventPublisher } from './infrastructure/provisioning/events/webhook-provisioning-event.publisher.js';
+import type { ProvisioningEventPublisherPort } from './application/ports/provisioning/provisioning-event-publisher.port.js';
 import { ProvisioningAutomationActionAdapter } from './infrastructure/automation/adapters/provisioning-automation-action.adapter.js';
 import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
@@ -649,6 +651,28 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
 ]);
 const provisioningEngineRetryPolicy = new ProvisioningRetryPolicy(environment.PROVISIONING_MAX_ATTEMPTS);
 
+const provisioningWebhookUrls = (environment.PROVISIONING_WEBHOOK_URLS ?? '')
+  .split(',')
+  .map((url) => url.trim())
+  .filter((url) => url.length > 0);
+const provisioningEventPublisher: ProvisioningEventPublisherPort =
+  environment.PROVISIONING_WEBHOOK_ENABLED && provisioningWebhookUrls.length > 0
+    ? new WebhookProvisioningEventPublisher(
+        provisioningWebhookUrls.map((url) => ({
+          ...(environment.PROVISIONING_WEBHOOK_HMAC_SECRET_REFERENCE === undefined
+            ? {}
+            : { hmacSecretReference: environment.PROVISIONING_WEBHOOK_HMAC_SECRET_REFERENCE }),
+          url,
+        })),
+        new EnvironmentSecretProvider(),
+        {
+          allowHttp: environment.PROVISIONING_WEBHOOK_ALLOW_HTTP,
+          maxAttemptsPerEndpoint: environment.PROVISIONING_WEBHOOK_MAX_ATTEMPTS,
+          timeoutMs: environment.PROVISIONING_WEBHOOK_TIMEOUT_MS,
+        },
+      )
+    : new LoggingProvisioningEventPublisher();
+
 const provisioningRequestsController = new ProvisioningRequestsController({
   requestProvisioning: new RequestProvisioning(
     provisioningRequestRepo,
@@ -689,7 +713,7 @@ const provisioningWorkerHost = new WorkerHost(
     ),
     new ProvisioningEventDispatcher(
       new SqliteProvisioningEventWorkRepository(sqlite.session),
-      new LoggingProvisioningEventPublisher(),
+      provisioningEventPublisher,
       clock,
       {},
       provisioningEventLogger
