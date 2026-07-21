@@ -26,8 +26,14 @@ import type {
   RouterOsNatRuleMoveTarget,
   RouterOsNatRuleReference,
   RouterOsNatRuleUpdateData,
+  RouterOsMangleRule,
+  RouterOsMangleRuleCreateData,
+  RouterOsMangleRuleMoveTarget,
+  RouterOsMangleRuleReference,
+  RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
+import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 
 export class FakeRouterOsClient implements RouterOsClientPort {
@@ -38,6 +44,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public addressListEntries: RouterOsAddressListEntry[] = [];
   public filterRules: RouterOsFilterRule[] = [];
   public natRules: RouterOsNatRule[] = [];
+  public mangleRules: RouterOsMangleRule[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -664,6 +671,153 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.toPorts !== undefined ? { toPorts: data.toPorts } : {}),
     };
     this.natRules[index] = ruleData;
+  }
+
+  public async createMangleRule(rule: RouterOsMangleRuleCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const ruleData: RouterOsMangleRule = {
+      action: rule.action,
+      chain: rule.chain,
+      comment: rule.comment,
+      ...(rule.connectionMark !== undefined ? { connectionMark: rule.connectionMark } : {}),
+      ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
+      disabled: rule.disabled ?? false,
+      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
+      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      id: `*${this.nextId++}`,
+      ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      ...(rule.newConnectionMark !== undefined ? { newConnectionMark: rule.newConnectionMark } : {}),
+      ...(rule.newPacketMark !== undefined ? { newPacketMark: rule.newPacketMark } : {}),
+      ...(rule.newRoutingMark !== undefined ? { newRoutingMark: rule.newRoutingMark } : {}),
+      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      ...(rule.packetMark !== undefined ? { packetMark: rule.packetMark } : {}),
+      ...(rule.passthrough !== undefined ? { passthrough: rule.passthrough } : {}),
+      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
+      ...(rule.routingMark !== undefined ? { routingMark: rule.routingMark } : {}),
+      ...(MangleRuleComment.extractReference(rule.comment) !== null
+        ? { ruleReference: MangleRuleComment.extractReference(rule.comment)! }
+        : {}),
+      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
+      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+    };
+    this.insertRuleAt(this.mangleRules, ruleData, rule.placeBeforeId);
+  }
+
+  public async disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findMangleRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.mangleRules.findIndex((r) => r.id === rule.id);
+    this.mangleRules[index] = { ...rule, disabled: true };
+  }
+
+  public async enableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findMangleRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.mangleRules.findIndex((r) => r.id === rule.id);
+    this.mangleRules[index] = { ...rule, disabled: false };
+  }
+
+  public async findMangleRule(reference: RouterOsMangleRuleReference): Promise<RouterOsMangleRule | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = this.mangleRules.find(
+      (r) =>
+        (reference.id !== undefined && r.id === reference.id) ||
+        (reference.id === undefined &&
+          reference.ruleReference !== undefined &&
+          r.ruleReference === reference.ruleReference),
+    );
+    return rule ?? null;
+  }
+
+  public async listMangleRules(): Promise<RouterOsMangleRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.mangleRules];
+  }
+
+  public async moveMangleRule(
+    reference: RouterOsMangleRuleReference,
+    target: RouterOsMangleRuleMoveTarget,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findMangleRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.mangleRules = this.mangleRules.filter((r) => r.id !== rule.id);
+    this.insertRuleAt(this.mangleRules, rule, target.placeBeforeId);
+  }
+
+  public async removeMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findMangleRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.mangleRules = this.mangleRules.filter((r) => r.id !== rule.id);
+  }
+
+  public async updateMangleRule(
+    reference: RouterOsMangleRuleReference,
+    data: RouterOsMangleRuleUpdateData,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findMangleRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.mangleRules.findIndex((r) => r.id === rule.id);
+    const ruleData: RouterOsMangleRule = {
+      ...rule,
+      ...(data.action !== undefined ? { action: data.action } : {}),
+      ...(data.chain !== undefined ? { chain: data.chain } : {}),
+      ...(data.comment !== undefined
+        ? {
+            comment: data.comment,
+            ...(MangleRuleComment.extractReference(data.comment) !== null
+              ? { ruleReference: MangleRuleComment.extractReference(data.comment)! }
+              : {}),
+          }
+        : {}),
+      ...(data.connectionMark !== undefined ? { connectionMark: data.connectionMark } : {}),
+      ...(data.connectionState !== undefined ? { connectionState: data.connectionState } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.dstAddress !== undefined ? { dstAddress: data.dstAddress } : {}),
+      ...(data.dstPort !== undefined ? { dstPort: data.dstPort } : {}),
+      ...(data.inInterface !== undefined ? { inInterface: data.inInterface } : {}),
+      ...(data.newConnectionMark !== undefined ? { newConnectionMark: data.newConnectionMark } : {}),
+      ...(data.newPacketMark !== undefined ? { newPacketMark: data.newPacketMark } : {}),
+      ...(data.newRoutingMark !== undefined ? { newRoutingMark: data.newRoutingMark } : {}),
+      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
+      ...(data.packetMark !== undefined ? { packetMark: data.packetMark } : {}),
+      ...(data.passthrough !== undefined ? { passthrough: data.passthrough } : {}),
+      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
+      ...(data.routingMark !== undefined ? { routingMark: data.routingMark } : {}),
+      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
+      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
+    };
+    this.mangleRules[index] = ruleData;
   }
 
   private insertRuleAt<T extends { id: string }>(rules: T[], rule: T, placeBeforeId: string | undefined): void {

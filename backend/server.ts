@@ -42,6 +42,7 @@ import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisionin
 import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
 import { RouterOsFirewallFilterProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-filter-provisioning.adapter.js';
 import { RouterOsNatProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-nat-provisioning.adapter.js';
+import { RouterOsMangleProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-mangle-provisioning.adapter.js';
 import { PinoProvisioningEventLogger } from './infrastructure/provisioning/logging/provisioning-event.logger.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
@@ -753,6 +754,60 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.firewall.nat.remove',
     new RouterOsNatProvisioningAdapter(
       'routeros.firewall.nat.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.add',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.add',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.update',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.move',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.move',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.enable',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.disable',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.mangle.remove',
+    new RouterOsMangleProvisioningAdapter(
+      'routeros.firewall.mangle.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

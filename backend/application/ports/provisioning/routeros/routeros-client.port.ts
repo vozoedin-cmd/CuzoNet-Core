@@ -257,6 +257,86 @@ export interface RouterOsNatRuleMoveTarget {
   readonly placeBeforeId?: string;
 }
 
+export interface RouterOsMangleRuleReference {
+  readonly id?: string;
+  readonly ruleReference?: string;
+}
+
+export interface RouterOsMangleRule {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly connectionMark?: string;
+  readonly connectionState?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+  readonly outInterface?: string;
+  readonly packetMark?: string;
+  readonly passthrough?: boolean;
+  readonly protocol?: string;
+  readonly routingMark?: string;
+  readonly ruleReference?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+}
+
+export interface RouterOsMangleRuleCreateData {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment: string;
+  readonly connectionMark?: string;
+  readonly connectionState?: string;
+  readonly disabled?: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+  readonly outInterface?: string;
+  readonly packetMark?: string;
+  readonly passthrough?: boolean;
+  /** .id of the existing rule this one should be inserted before; omit to append at the end. */
+  readonly placeBeforeId?: string;
+  readonly protocol?: string;
+  readonly routingMark?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+}
+
+export interface RouterOsMangleRuleUpdateData {
+  readonly action?: string;
+  readonly chain?: string;
+  readonly comment?: string;
+  readonly connectionMark?: string;
+  readonly connectionState?: string;
+  readonly disabled?: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+  readonly outInterface?: string;
+  readonly packetMark?: string;
+  readonly passthrough?: boolean;
+  readonly protocol?: string;
+  readonly routingMark?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+}
+
+export interface RouterOsMangleRuleMoveTarget {
+  /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
+  readonly placeBeforeId?: string;
+}
+
 export interface RouterOsClientPort {
   close(): Promise<void>;
 
@@ -310,6 +390,16 @@ export interface RouterOsClientPort {
   moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void>;
   removeNatRule(reference: RouterOsNatRuleReference): Promise<void>;
   updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void>;
+
+  createMangleRule(rule: RouterOsMangleRuleCreateData): Promise<void>;
+  disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
+  enableMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
+  findMangleRule(reference: RouterOsMangleRuleReference): Promise<RouterOsMangleRule | null>;
+  /** Global, physically-ordered listing of all Mangle rules (across every chain), used to resolve position/move targets. */
+  listMangleRules(): Promise<RouterOsMangleRule[]>;
+  moveMangleRule(reference: RouterOsMangleRuleReference, target: RouterOsMangleRuleMoveTarget): Promise<void>;
+  removeMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
+  updateMangleRule(reference: RouterOsMangleRuleReference, data: RouterOsMangleRuleUpdateData): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {
