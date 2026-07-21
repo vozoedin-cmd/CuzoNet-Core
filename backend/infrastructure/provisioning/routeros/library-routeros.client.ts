@@ -11,6 +11,10 @@ import type {
   RouterOsPppoeSecretCreateData,
   RouterOsPppoeSecretReference,
   RouterOsPppoeSecretUpdateData,
+  RouterOsHotspotUser,
+  RouterOsHotspotUserCreateData,
+  RouterOsHotspotUserReference,
+  RouterOsHotspotUserUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 
 export class LibraryRouterOsClient implements RouterOsClientPort {
@@ -251,6 +255,122 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (Object.keys(attributes).length === 1) return;
 
     await this.client.execute('/ppp/secret/set', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async createHotspotUser(user: RouterOsHotspotUserCreateData): Promise<void> {
+    const attributes: Record<string, string> = {
+      name: user.name,
+      password: user.password,
+      profile: user.profile,
+    };
+    if (user.comment !== undefined) attributes.comment = user.comment;
+    if (user.server !== undefined) attributes.server = user.server;
+    if (user.limitUptime !== undefined) attributes['limit-uptime'] = user.limitUptime;
+    if (user.limitBytesTotal !== undefined) attributes['limit-bytes-total'] = String(user.limitBytesTotal);
+    if (user.sharedUsers !== undefined) attributes['shared-users'] = String(user.sharedUsers);
+    if (user.disabled !== undefined) attributes.disabled = user.disabled ? 'yes' : 'no';
+
+    await this.client.execute('/ip/hotspot/user/add', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async disableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    const user = await this.findHotspotUser(reference);
+    if (!user) return;
+
+    await this.client.execute('/ip/hotspot/user/disable', {
+      attributes: { numbers: user.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async enableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    const user = await this.findHotspotUser(reference);
+    if (!user) return;
+
+    await this.client.execute('/ip/hotspot/user/enable', {
+      attributes: { numbers: user.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findHotspotUser(
+    reference: RouterOsHotspotUserReference,
+  ): Promise<RouterOsHotspotUser | null> {
+    const query = reference.id !== undefined
+      ? `?.id=${reference.id}`
+      : `?name=${reference.name}`;
+
+    if (reference.id === undefined && reference.name === undefined) {
+      return null;
+    }
+
+    const replies = await this.client.print('/ip/hotspot/user/print', {
+      attributes: {
+        '.proplist': '.id,name,server,profile,password,disabled,comment,limit-uptime,limit-bytes-total,shared-users',
+      },
+      queries: [query],
+      timeoutMs: this.timeoutMs,
+    });
+
+    const reply = replies[0];
+    if (!reply) {
+      return null;
+    }
+
+    const limitBytesTotal = reply['limit-bytes-total'] ? Number(reply['limit-bytes-total']) : undefined;
+    const sharedUsers = reply['shared-users'] ? Number(reply['shared-users']) : undefined;
+
+    return {
+      comment: reply.comment ?? '',
+      disabled: reply.disabled === 'true',
+      id: reply['.id'] ?? '',
+      ...(limitBytesTotal !== undefined ? { limitBytesTotal } : {}),
+      ...(reply['limit-uptime'] ? { limitUptime: reply['limit-uptime'] as string } : {}),
+      name: reply.name ?? '',
+      password: reply.password ?? '',
+      profile: reply.profile ?? '',
+      server: reply.server ?? '',
+      ...(sharedUsers !== undefined ? { sharedUsers } : {}),
+    };
+  }
+
+  public async removeHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    const user = await this.findHotspotUser(reference);
+    if (!user) return;
+
+    await this.client.execute('/ip/hotspot/user/remove', {
+      attributes: { numbers: user.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updateHotspotUser(
+    reference: RouterOsHotspotUserReference,
+    data: RouterOsHotspotUserUpdateData,
+  ): Promise<void> {
+    const user = await this.findHotspotUser(reference);
+    if (!user) return;
+
+    const attributes: Record<string, string> = { numbers: user.id };
+    if (data.comment !== undefined) attributes.comment = data.comment;
+    if (data.name !== undefined) attributes.name = data.name;
+    if (data.password !== undefined) attributes.password = data.password;
+    if (data.profile !== undefined) attributes.profile = data.profile;
+    if (data.server !== undefined) attributes.server = data.server;
+    if (data.limitUptime !== undefined) attributes['limit-uptime'] = data.limitUptime;
+    if (data.limitBytesTotal !== undefined) attributes['limit-bytes-total'] = String(data.limitBytesTotal);
+    if (data.sharedUsers !== undefined) attributes['shared-users'] = String(data.sharedUsers);
+    if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
+
+    if (Object.keys(attributes).length === 1) return;
+
+    await this.client.execute('/ip/hotspot/user/set', {
       attributes,
       timeoutMs: this.timeoutMs,
     });

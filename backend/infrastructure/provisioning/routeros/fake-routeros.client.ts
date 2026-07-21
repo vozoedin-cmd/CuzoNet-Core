@@ -8,12 +8,17 @@ import type {
   RouterOsPppoeSecretCreateData,
   RouterOsPppoeSecretReference,
   RouterOsPppoeSecretUpdateData,
+  RouterOsHotspotUser,
+  RouterOsHotspotUserCreateData,
+  RouterOsHotspotUserReference,
+  RouterOsHotspotUserUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
   public queues: RouterOsSimpleQueue[] = [];
   public secrets: RouterOsPppoeSecret[] = [];
+  public hotspotUsers: RouterOsHotspotUser[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -192,5 +197,100 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.service !== undefined ? { service: data.service } : {}),
     };
     this.secrets[index] = secretData;
+  }
+
+  public async createHotspotUser(user: RouterOsHotspotUserCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const userData: RouterOsHotspotUser = {
+      ...(user.comment !== undefined ? { comment: user.comment } : {}),
+      ...(user.limitBytesTotal !== undefined ? { limitBytesTotal: user.limitBytesTotal } : {}),
+      ...(user.limitUptime !== undefined ? { limitUptime: user.limitUptime } : {}),
+      ...(user.server !== undefined ? { server: user.server } : {}),
+      ...(user.sharedUsers !== undefined ? { sharedUsers: user.sharedUsers } : {}),
+      disabled: user.disabled ?? false,
+      id: `*${this.nextId++}`,
+      name: user.name,
+      password: user.password,
+      profile: user.profile,
+    };
+    this.hotspotUsers.push(userData);
+  }
+
+  public async disableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const user = await this.findHotspotUser(reference);
+    if (!user) {
+      return;
+    }
+    const index = this.hotspotUsers.findIndex((u) => u.id === user.id);
+    this.hotspotUsers[index] = { ...user, disabled: true };
+  }
+
+  public async enableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const user = await this.findHotspotUser(reference);
+    if (!user) {
+      return;
+    }
+    const index = this.hotspotUsers.findIndex((u) => u.id === user.id);
+    this.hotspotUsers[index] = { ...user, disabled: false };
+  }
+
+  public async findHotspotUser(
+    reference: RouterOsHotspotUserReference,
+  ): Promise<RouterOsHotspotUser | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const user = this.hotspotUsers.find(
+      (u) =>
+        (reference.id !== undefined && u.id === reference.id) ||
+        (reference.name !== undefined && u.name === reference.name),
+    );
+    return user ?? null;
+  }
+
+  public async removeHotspotUser(reference: RouterOsHotspotUserReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const user = await this.findHotspotUser(reference);
+    if (!user) {
+      return;
+    }
+    this.hotspotUsers = this.hotspotUsers.filter((u) => u.id !== user.id);
+  }
+
+  public async updateHotspotUser(
+    reference: RouterOsHotspotUserReference,
+    data: RouterOsHotspotUserUpdateData,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const user = await this.findHotspotUser(reference);
+    if (!user) {
+      return;
+    }
+    const index = this.hotspotUsers.findIndex((u) => u.id === user.id);
+    const userData: RouterOsHotspotUser = {
+      ...user,
+      ...(data.comment !== undefined ? { comment: data.comment } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.limitBytesTotal !== undefined ? { limitBytesTotal: data.limitBytesTotal } : {}),
+      ...(data.limitUptime !== undefined ? { limitUptime: data.limitUptime } : {}),
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.password !== undefined ? { password: data.password } : {}),
+      ...(data.profile !== undefined ? { profile: data.profile } : {}),
+      ...(data.server !== undefined ? { server: data.server } : {}),
+      ...(data.sharedUsers !== undefined ? { sharedUsers: data.sharedUsers } : {}),
+    };
+    this.hotspotUsers[index] = userData;
   }
 }

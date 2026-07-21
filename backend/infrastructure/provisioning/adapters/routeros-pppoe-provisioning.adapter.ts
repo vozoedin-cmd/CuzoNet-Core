@@ -20,7 +20,7 @@ import {
 import { RouterOsProvisioningAdapterBase } from './routeros-provisioning-adapter.base.js';
 
 export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsPppoeInput> {
-  protected readonly referenceMetadataKey = 'secretReference';
+  protected readonly referenceMetadataKey = 'pppoeReference';
 
   public constructor(
     type: string,
@@ -53,10 +53,12 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     client: RouterOsClientPort,
     command: RouterOsPppoeCreateInput,
   ): Promise<string> {
+    const password = await this.resolveCredential(command.credentialReference);
+
     const existing = await client.findPppoeSecret({ name: command.name });
     if (existing) {
       if (
-        existing.password === command.password &&
+        existing.password === password &&
         existing.profile === command.profile &&
         existing.service === (command.service ?? 'pppoe')
       ) {
@@ -71,7 +73,7 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
       ...(command.disabled !== undefined ? { disabled: command.disabled } : {}),
       ...(command.service !== undefined ? { service: command.service } : {}),
       name: command.name,
-      password: command.password,
+      password,
       profile: command.profile,
     };
     await client.createPppoeSecret(createData);
@@ -82,43 +84,46 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     client: RouterOsClientPort,
     command: RouterOsPppoeUpdateInput,
   ): Promise<string> {
+    const password =
+      command.credentialReference === undefined ? undefined : await this.resolveCredential(command.credentialReference);
+
     const updateData: RouterOsPppoeSecretUpdateData = {
       ...(command.comment !== undefined ? { comment: command.comment } : {}),
       ...(command.disabled !== undefined ? { disabled: command.disabled } : {}),
       ...(command.name !== undefined ? { name: command.name } : {}),
-      ...(command.password !== undefined ? { password: command.password } : {}),
+      ...(password !== undefined ? { password } : {}),
       ...(command.profile !== undefined ? { profile: command.profile } : {}),
     };
 
     await client.updatePppoeSecret(
-      { id: command.secretReference, name: command.secretReference },
+      { id: command.pppoeReference, name: command.pppoeReference },
       updateData,
     );
-    return command.secretReference;
+    return command.pppoeReference;
   }
 
   private async handleEnable(
     client: RouterOsClientPort,
     command: RouterOsPppoeEnableInput,
   ): Promise<string> {
-    await client.enablePppoeSecret({ id: command.secretReference, name: command.secretReference });
-    return command.secretReference;
+    await client.enablePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    return command.pppoeReference;
   }
 
   private async handleDisable(
     client: RouterOsClientPort,
     command: RouterOsPppoeDisableInput,
   ): Promise<string> {
-    await client.disablePppoeSecret({ id: command.secretReference, name: command.secretReference });
-    return command.secretReference;
+    await client.disablePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    return command.pppoeReference;
   }
 
   private async handleRemove(
     client: RouterOsClientPort,
     command: RouterOsPppoeRemoveInput,
   ): Promise<string> {
-    await client.removePppoeSecret({ id: command.secretReference, name: command.secretReference });
-    return command.secretReference;
+    await client.removePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    return command.pppoeReference;
   }
 
   protected override mapExecutionError(error: unknown): ProvisioningActionResult {

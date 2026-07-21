@@ -62,6 +62,48 @@ export interface RouterOsPppoeSecretUpdateData {
   readonly service?: string;
 }
 
+export interface RouterOsHotspotUserReference {
+  readonly id?: string;
+  readonly name?: string;
+}
+
+export interface RouterOsHotspotUser {
+  readonly comment?: string;
+  readonly disabled: boolean;
+  readonly id: string;
+  readonly limitBytesTotal?: number;
+  readonly limitUptime?: string;
+  readonly name: string;
+  readonly password?: string;
+  readonly profile: string;
+  readonly server?: string;
+  readonly sharedUsers?: number;
+}
+
+export interface RouterOsHotspotUserCreateData {
+  readonly comment?: string;
+  readonly disabled?: boolean;
+  readonly limitBytesTotal?: number;
+  readonly limitUptime?: string;
+  readonly name: string;
+  readonly password: string;
+  readonly profile: string;
+  readonly server?: string;
+  readonly sharedUsers?: number;
+}
+
+export interface RouterOsHotspotUserUpdateData {
+  readonly comment?: string;
+  readonly disabled?: boolean;
+  readonly limitBytesTotal?: number;
+  readonly limitUptime?: string;
+  readonly name?: string;
+  readonly password?: string;
+  readonly profile?: string;
+  readonly server?: string;
+  readonly sharedUsers?: number;
+}
+
 export interface RouterOsClientPort {
   close(): Promise<void>;
 
@@ -78,6 +120,13 @@ export interface RouterOsClientPort {
   findPppoeSecret(reference: RouterOsPppoeSecretReference): Promise<RouterOsPppoeSecret | null>;
   removePppoeSecret(reference: RouterOsPppoeSecretReference): Promise<void>;
   updatePppoeSecret(reference: RouterOsPppoeSecretReference, data: RouterOsPppoeSecretUpdateData): Promise<void>;
+
+  createHotspotUser(user: RouterOsHotspotUserCreateData): Promise<void>;
+  disableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void>;
+  enableHotspotUser(reference: RouterOsHotspotUserReference): Promise<void>;
+  findHotspotUser(reference: RouterOsHotspotUserReference): Promise<RouterOsHotspotUser | null>;
+  removeHotspotUser(reference: RouterOsHotspotUserReference): Promise<void>;
+  updateHotspotUser(reference: RouterOsHotspotUserReference, data: RouterOsHotspotUserUpdateData): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {

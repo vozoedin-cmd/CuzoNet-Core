@@ -13,6 +13,7 @@ import type {
   RouterOsClientPort,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
+import { RouterOsPasswordSecretNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-password-secret-not-found.error.js';
 import { logger } from '../../logging/logger.js';
 
 export interface RouterOsCommand {
@@ -70,8 +71,9 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
     const logContext = {
       action: 'provisioning.routeros.execute',
       actionType: input.actionType,
+      attemptNumber: input.attemptNumber,
       module: 'provisioning',
-      requestId: input.requestId,
+      provisioningId: input.requestId,
       routerId: command.routerId,
     };
 
@@ -97,29 +99,42 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
     try {
       client = await this.createClient(profile, secret);
     } catch (e: unknown) {
-      logger.warn({ ...logContext, error: e instanceof Error ? e.message : String(e) }, 'routeros_provisioning_client_creation_failed');
-      return this.mapClientCreationError(e);
+      const failure = this.mapClientCreationError(e);
+      logger.warn({ ...logContext, ...this.resultLogFields(failure) }, 'routeros_provisioning_client_creation_failed');
+      return failure;
     }
 
     const startTime = Date.now();
     try {
       const reference = await this.executeOperation(client, command);
-      logger.info({ ...logContext, durationMs: Date.now() - startTime, reference }, 'routeros_provisioning_succeeded');
+      const durationMs = Date.now() - startTime;
+      logger.info({ ...logContext, durationMs, result: 'success' }, 'routeros_provisioning_succeeded');
       return {
         metadata: {
           actionType: input.actionType,
-          durationMs: Date.now() - startTime,
+          durationMs,
           [this.referenceMetadataKey]: reference,
           routerId: command.routerId,
         },
         outcome: 'success',
       };
     } catch (e: unknown) {
-      logger.warn({ ...logContext, error: e instanceof Error ? e.message : String(e) }, 'routeros_provisioning_execution_failed');
-      return this.mapExecutionError(e);
+      const failure = this.mapExecutionError(e);
+      logger.warn(
+        { ...logContext, durationMs: Date.now() - startTime, ...this.resultLogFields(failure) },
+        'routeros_provisioning_execution_failed',
+      );
+      return failure;
     } finally {
       await this.closeClient(client);
     }
+  }
+
+  /** Extracts {result, errorCode} for structured logging without ever logging secrets/payloads. */
+  private resultLogFields(result: ProvisioningActionResult): { errorCode?: string; result: string } {
+    return result.outcome === 'success'
+      ? { result: result.outcome }
+      : { errorCode: result.errorCode, result: result.outcome };
   }
 
   protected resolveConnection(companyId: string, routerId: string): Promise<RouterConnectionProfile | null> {
@@ -128,6 +143,22 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
 
   protected resolveSecret(secretReference: string): Promise<string | null> {
     return this.secretProvider.getSecret(secretReference);
+  }
+
+  /**
+   * Resolves a client credential reference (e.g. a PPPoE/Hotspot password)
+   * to its real secret value via SecretProviderPort. The raw secret never
+   * comes from the request payload, so it is never persisted in
+   * ProvisioningRequest.inputSnapshotJson, logged, or emitted as an event.
+   */
+  protected async resolveCredential(credentialReference: string): Promise<string> {
+    const credential = await this.resolveSecret(credentialReference);
+    if (credential === null) {
+      throw new RouterOsPasswordSecretNotFoundError(
+        `Credencial no encontrada para la referencia: ${credentialReference}`,
+      );
+    }
+    return credential;
   }
 
   protected createClient(profile: RouterConnectionProfile, secret: string): Promise<RouterOsClientPort> {
@@ -190,6 +221,13 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
   }
 
   protected mapGenericExecutionError(error: unknown): ProvisioningActionResult {
+    if (error instanceof RouterOsPasswordSecretNotFoundError) {
+      return {
+        errorCode: 'ROUTEROS_PASSWORD_SECRET_NOT_FOUND',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
     const message = error instanceof Error ? error.message.toLowerCase() : '';
     if (message.includes('timeout') || message.includes('disconnected') || message.includes('interrupted')) {
       return {

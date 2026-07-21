@@ -56,6 +56,7 @@ export class DispatchProvisioningRequest {
     try {
       const result = await adapter.execute({
         actionType: request.actionType,
+        attemptNumber: attempt.attemptNumber,
         companyId: request.companyId,
         configurationReference: request.configurationReference,
         idempotencyKey: request.idempotencyKey,

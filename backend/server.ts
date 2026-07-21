@@ -31,6 +31,7 @@ import { ProvisioningAutomationActionAdapter } from './infrastructure/automation
 import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
 import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
+import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
 import { SystemRouterOsClientFactory } from './infrastructure/provisioning/routeros/system-routeros-client.factory.js';
@@ -542,6 +543,51 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.pppoe.remove',
     new RouterOsPppoeProvisioningAdapter(
       'routeros.pppoe.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user.create',
+    new RouterOsHotspotProvisioningAdapter(
+      'routeros.hotspot.user.create',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user.update',
+    new RouterOsHotspotProvisioningAdapter(
+      'routeros.hotspot.user.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user.enable',
+    new RouterOsHotspotProvisioningAdapter(
+      'routeros.hotspot.user.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user.disable',
+    new RouterOsHotspotProvisioningAdapter(
+      'routeros.hotspot.user.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user.remove',
+    new RouterOsHotspotProvisioningAdapter(
+      'routeros.hotspot.user.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

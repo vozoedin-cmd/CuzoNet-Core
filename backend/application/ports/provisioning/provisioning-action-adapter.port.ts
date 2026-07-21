@@ -5,6 +5,8 @@ export interface ProvisioningActionTarget {
 
 export interface ProvisioningActionInput {
   actionType: string;
+  /** 1-based attempt number for this execution, when known by the caller (used for observability). */
+  attemptNumber?: number;
   companyId: string;
   configurationReference: string | undefined;
   idempotencyKey: string;
