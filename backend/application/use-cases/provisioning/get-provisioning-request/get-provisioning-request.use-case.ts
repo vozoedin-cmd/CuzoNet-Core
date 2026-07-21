@@ -1,6 +1,7 @@
 import type { ProvisioningRequestDto } from '../../../dto/provisioning/provisioning-request.dto.js';
 import type { ProvisioningRequestRepository } from '../../../ports/provisioning/provisioning-request-repository.port.js';
 import type { CompanyContext } from '../../../ports/company-context.port.js';
+import { ProvisioningRequestMapper } from '../../../mappers/provisioning/provisioning-request.mapper.js';
 
 export class GetProvisioningRequest {
   public constructor(
@@ -13,6 +14,6 @@ export class GetProvisioningRequest {
     if (!request || request.companyId !== this.companyContext.getCompanyId()) {
       return undefined;
     }
-    return request.toDto();
+    return ProvisioningRequestMapper.toDto(request);
   }
 }

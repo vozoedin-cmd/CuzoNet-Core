@@ -3,9 +3,13 @@ import type { CancelProvisioningRequest } from '../../../application/use-cases/p
 import type { GetProvisioningRequest } from '../../../application/use-cases/provisioning/get-provisioning-request/get-provisioning-request.use-case.js';
 import type { ListProvisioningRequests } from '../../../application/use-cases/provisioning/list-provisioning-requests/list-provisioning-requests.use-case.js';
 import type { RequestProvisioning } from '../../../application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
-import type { RequestProvisioningInput } from '../../../application/dto/provisioning/provisioning-request.dto.js';
-import type { ProvisioningStatus } from '../../../domain/provisioning/provisioning-request.js';
+import type {
+  ProvisioningRequestDto,
+  RequestProvisioningInput,
+} from '../../../application/dto/provisioning/provisioning-request.dto.js';
 import { parseRequestProvisioning } from '../validators/provisioning-requests.schemas.js';
+
+type ProvisioningStatus = ProvisioningRequestDto['status'];
 
 export interface ProvisioningRequestsControllerDependencies {
   cancelRequest: CancelProvisioningRequest;

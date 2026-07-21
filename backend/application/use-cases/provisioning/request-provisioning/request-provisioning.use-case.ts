@@ -4,6 +4,7 @@ import type { IdGenerator } from '../../../ports/id-generator.port.js';
 import type { ProvisioningRequestRepository } from '../../../ports/provisioning/provisioning-request-repository.port.js';
 import { ProvisioningRequest } from '../../../../domain/provisioning/provisioning-request.js';
 import { ProvisioningIdempotencyConflictError } from '../../../../domain/provisioning/errors/provisioning-engine.error.js';
+import { ProvisioningRequestMapper } from '../../../mappers/provisioning/provisioning-request.mapper.js';
 
 export class RequestProvisioning {
   public constructor(
@@ -48,9 +49,9 @@ export class RequestProvisioning {
       if (existing.inputHash !== inputHash || existing.sourceExecutionId !== input.sourceExecutionId) {
         throw new ProvisioningIdempotencyConflictError(input.idempotencyKey);
       }
-      return existing.toDto();
+      return ProvisioningRequestMapper.toDto(existing);
     }
 
-    return request.toDto();
+    return ProvisioningRequestMapper.toDto(request);
   }
 }

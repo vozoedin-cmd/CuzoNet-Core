@@ -1,5 +1,4 @@
 import { ProvisioningTransitionError, SensitiveDataInProvisioningError } from './errors/provisioning-engine.error.js';
-import type { ProvisioningRequestDto } from '../../application/dto/provisioning/provisioning-request.dto.js';
 
 export type ProvisioningStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
@@ -197,33 +196,8 @@ export class ProvisioningRequest {
     this.props.updatedAt = at;
   }
 
-  public toDto(): ProvisioningRequestDto {
-    const dto: Partial<ProvisioningRequestDto> = {
-      actionType: this.props.actionType,
-      attemptCount: this.props.attemptCount,
-      companyId: this.props.companyId,
-      createdAt: this.props.createdAt.toISOString(),
-      id: this.id,
-      idempotencyKey: this.props.idempotencyKey,
-      inputHash: this.props.inputHash,
-      inputSnapshotJson: this.props.inputSnapshotJson,
-      maxAttempts: this.props.maxAttempts,
-      status: this.props.status,
-      targetId: this.props.targetId,
-      targetType: this.props.targetType,
-      updatedAt: this.props.updatedAt.toISOString(),
-    };
-
-    if (this.props.completedAt) dto.completedAt = this.props.completedAt.toISOString();
-    if (this.props.configurationReference !== undefined) dto.configurationReference = this.props.configurationReference;
-    if (this.props.lastErrorCode !== undefined) dto.lastErrorCode = this.props.lastErrorCode;
-    if (this.props.lastErrorMessage !== undefined) dto.lastErrorMessage = this.props.lastErrorMessage;
-    if (this.props.nextAttemptAt) dto.nextAttemptAt = this.props.nextAttemptAt.toISOString();
-    if (this.props.processingStartedAt) dto.processingStartedAt = this.props.processingStartedAt.toISOString();
-    if (this.props.processingWorkerId !== undefined) dto.processingWorkerId = this.props.processingWorkerId;
-    if (this.props.sourceExecutionId !== undefined) dto.sourceExecutionId = this.props.sourceExecutionId;
-
-    return dto as ProvisioningRequestDto;
+  public toProps(): ProvisioningRequestProps {
+    return { ...this.props };
   }
 
   private validateNoSecrets(jsonString: string): void {

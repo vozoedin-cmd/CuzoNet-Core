@@ -18,7 +18,8 @@
     "lint:fix": "eslint . --fix",
     "format:check": "prettier --check .",
     "format:write": "prettier --write .",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "validate:architecture": "depcruise backend --config .dependency-cruiser.cjs",
+    "check": "npm run typecheck && npm run lint && npm run validate:architecture && npm run format:check && npm run test"
   },
   "dependencies": {
     "@sourceregistry/mikrotik-client": "^1.0.0-alpha.6",
@@ -37,6 +38,7 @@
     "@types/net-snmp": "^3.23.0",
     "@types/node": "^24.3.0",
     "@types/supertest": "^6.0.3",
+    "dependency-cruiser": "^18.1.0",
     "eslint": "~10.6.0",
     "prettier": "~3.9.4",
     "supertest": "^7.1.4",

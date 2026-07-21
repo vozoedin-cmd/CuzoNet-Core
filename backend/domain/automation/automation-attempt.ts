@@ -15,30 +15,11 @@ export interface AutomationAttemptProps {
   createdAt: Date;
 }
 
-import type { AutomationAttemptDto } from '../../application/dto/automation/automation-attempt.dto.js';
-
 export class AutomationAttempt {
   private constructor(private readonly props: AutomationAttemptProps) {}
 
   public static rehydrate(props: AutomationAttemptProps): AutomationAttempt {
     return new AutomationAttempt(props);
-  }
-
-  public static fromDto(dto: AutomationAttemptDto): AutomationAttempt {
-    return new AutomationAttempt({
-      attemptNumber: dto.attemptNumber,
-      completedAt: dto.completedAt ? new Date(dto.completedAt) : undefined,
-      createdAt: new Date(dto.createdAt),
-      errorCode: dto.errorCode,
-      errorMessage: dto.errorMessage,
-      executionId: dto.executionId,
-      id: dto.id,
-      metadataJson: dto.metadataJson,
-      providerExecutionId: dto.providerExecutionId,
-      responseCode: dto.responseCode,
-      startedAt: new Date(dto.startedAt),
-      status: dto.status,
-    });
   }
 
   public static create(
@@ -91,20 +72,7 @@ export class AutomationAttempt {
     this.props.completedAt = now;
   }
 
-  public toDto(): AutomationAttemptDto {
-    return {
-      attemptNumber: this.props.attemptNumber,
-      completedAt: this.props.completedAt?.toISOString(),
-      createdAt: this.props.createdAt.toISOString(),
-      errorCode: this.props.errorCode,
-      errorMessage: this.props.errorMessage,
-      executionId: this.props.executionId,
-      id: this.props.id,
-      metadataJson: this.props.metadataJson,
-      providerExecutionId: this.props.providerExecutionId,
-      responseCode: this.props.responseCode,
-      startedAt: this.props.startedAt.toISOString(),
-      status: this.props.status,
-    };
+  public toProps(): AutomationAttemptProps {
+    return { ...this.props };
   }
 }

@@ -4,7 +4,7 @@ import type {
   RouterOsClientPort,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { environment } from '../../config/environment.js';
-import { LibraryRouterOsSimpleQueueClient } from './library-routeros-simple-queue.client.js';
+import { LibraryRouterOsClient } from './library-routeros.client.js';
 
 export class SystemRouterOsClientFactory implements RouterOsClientFactoryPort {
   public async create(
@@ -14,6 +14,6 @@ export class SystemRouterOsClientFactory implements RouterOsClientFactoryPort {
     if (!environment.ROUTEROS_PROVISIONING_ENABLED) {
       throw new Error('ROUTEROS_PROVISIONING_DISABLED');
     }
-    return LibraryRouterOsSimpleQueueClient.connect(profile, secret);
+    return LibraryRouterOsClient.connect(profile, secret);
   }
 }

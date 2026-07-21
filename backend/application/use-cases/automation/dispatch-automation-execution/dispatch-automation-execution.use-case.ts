@@ -4,8 +4,9 @@ import type { AutomationExecutionRepository } from '../../../ports/automation/au
 import type { Clock } from '../../../ports/clock.port.js';
 import type { IdGenerator } from '../../../ports/id-generator.port.js';
 import { AutomationAttempt } from '../../../../domain/automation/automation-attempt.js';
-import { AutomationExecution } from '../../../../domain/automation/automation-execution.js';
 import { AutomationRetryPolicy } from '../../../../domain/automation/services/automation-retry-policy.js';
+import { AutomationAttemptMapper } from '../../../mappers/automation/automation-attempt.mapper.js';
+import { AutomationExecutionMapper } from '../../../mappers/automation/automation-execution.mapper.js';
 
 export class DispatchAutomationExecutionUseCase {
   private readonly retryPolicy: AutomationRetryPolicy;
@@ -30,7 +31,7 @@ export class DispatchAutomationExecutionUseCase {
     const dto = await this.executions.findById(companyId, executionId);
     if (!dto) return;
 
-    const execution = AutomationExecution.fromDto(dto);
+    const execution = AutomationExecutionMapper.toDomain(dto);
     const now = this.clock.now();
 
     try {
@@ -40,7 +41,7 @@ export class DispatchAutomationExecutionUseCase {
       return;
     }
     
-    await this.executions.save(companyId, execution.toDto());
+    await this.executions.save(companyId, AutomationExecutionMapper.toDto(execution));
 
     const attempt = AutomationAttempt.create(
       execution.id,
@@ -48,7 +49,7 @@ export class DispatchAutomationExecutionUseCase {
       now,
       this.idGenerator.generate(),
     );
-    await this.attempts.save(attempt.toDto());
+    await this.attempts.save(AutomationAttemptMapper.toDto(attempt));
 
     let snapshot: Record<string, unknown>;
     try {
@@ -56,7 +57,7 @@ export class DispatchAutomationExecutionUseCase {
     } catch {
       // Invalid snapshot
       execution.fail('INVALID_SNAPSHOT', 'Action snapshot is not valid JSON', now);
-      await this.executions.save(companyId, execution.toDto());
+      await this.executions.save(companyId, AutomationExecutionMapper.toDto(execution));
       return;
     }
 
@@ -64,8 +65,8 @@ export class DispatchAutomationExecutionUseCase {
     if (!adapter) {
       attempt.fail(undefined, 'ADAPTER_NOT_FOUND', `No adapter found for type ${execution.actionType}`, now);
       execution.fail('ADAPTER_NOT_FOUND', `No adapter found for type ${execution.actionType}`, now);
-      await this.attempts.save(attempt.toDto());
-      await this.executions.save(companyId, execution.toDto());
+      await this.attempts.save(AutomationAttemptMapper.toDto(attempt));
+      await this.executions.save(companyId, AutomationExecutionMapper.toDto(execution));
       return;
     }
 
@@ -113,7 +114,7 @@ export class DispatchAutomationExecutionUseCase {
       }
     }
 
-    await this.attempts.save(attempt.toDto());
-    await this.executions.save(companyId, execution.toDto());
+    await this.attempts.save(AutomationAttemptMapper.toDto(attempt));
+    await this.executions.save(companyId, AutomationExecutionMapper.toDto(execution));
   }
 }

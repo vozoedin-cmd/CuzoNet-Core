@@ -4,8 +4,8 @@ import type { AcknowledgeIncidentUseCase } from '../../application/use-cases/ale
 import type { GetIncidentUseCase } from '../../application/use-cases/alerting/get-incident.usecase.js';
 import type { ListAlertRulesUseCase } from '../../application/use-cases/alerting/list-alert-rules.usecase.js';
 import type { ListIncidentsUseCase } from '../../application/use-cases/alerting/list-incidents.usecase.js';
-import type { AlertRule } from '../../domain/alerting/alert-rule.js';
-import type { Incident } from '../../domain/alerting/incident.js';
+import { AlertRuleMapper } from '../../application/mappers/alerting/alert-rule.mapper.js';
+import { IncidentMapper } from '../../application/mappers/alerting/incident.mapper.js';
 import {
   acknowledgeIncidentBodySchema,
   companyQuerySchema,
@@ -32,7 +32,7 @@ export class IncidentAlertingController {
       ...(query.severity === undefined ? {} : { severity: query.severity }),
       ...(query.status === undefined ? {} : { status: query.status }),
     });
-    response.status(200).json({ items: incidents.map(toIncidentDto) });
+    response.status(200).json({ items: incidents.map((incident) => IncidentMapper.toDto(incident)) });
   };
 
   public readonly getIncident: RequestHandler = async (request, response) => {
@@ -42,7 +42,7 @@ export class IncidentAlertingController {
       query.companyId,
       params.incidentId,
     );
-    response.status(200).json(toIncidentDto(incident));
+    response.status(200).json(IncidentMapper.toDto(incident));
   };
 
   public readonly acknowledgeIncident: RequestHandler = async (request, response) => {
@@ -54,34 +54,12 @@ export class IncidentAlertingController {
       correlationId: request.correlationId,
       incidentId: params.incidentId,
     });
-    response.status(200).json(toIncidentDto(incident));
+    response.status(200).json(IncidentMapper.toDto(incident));
   };
 
   public readonly listAlertRules: RequestHandler = async (request, response) => {
     const query = parseAlertingRequest(companyQuerySchema, request.query);
     const rules = await this.dependencies.listAlertRules.execute(query.companyId);
-    response.status(200).json({ items: rules.map(toAlertRuleDto) });
-  };
-}
-
-function toIncidentDto(incident: Incident): Record<string, unknown> {
-  const props = incident.props;
-  return {
-    ...props,
-    acknowledgedAt: props.acknowledgedAt?.toISOString() ?? null,
-    createdAt: props.createdAt.toISOString(),
-    lastEvaluatedAt: props.lastEvaluatedAt.toISOString(),
-    lastTriggeredAt: props.lastTriggeredAt.toISOString(),
-    openedAt: props.openedAt.toISOString(),
-    resolvedAt: props.resolvedAt?.toISOString() ?? null,
-    updatedAt: props.updatedAt.toISOString(),
-  };
-}
-
-function toAlertRuleDto(rule: AlertRule): Record<string, unknown> {
-  return {
-    ...rule.props,
-    createdAt: rule.props.createdAt.toISOString(),
-    updatedAt: rule.props.updatedAt.toISOString(),
+    response.status(200).json({ items: rules.map((rule) => AlertRuleMapper.toDto(rule)) });
   };
 }

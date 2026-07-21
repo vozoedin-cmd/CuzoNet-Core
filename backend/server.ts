@@ -30,6 +30,7 @@ import { ProvisioningDispatchWorker } from './infrastructure/workers/provisionin
 import { ProvisioningAutomationActionAdapter } from './infrastructure/automation/adapters/provisioning-automation-action.adapter.js';
 import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioning/adapters/disabled-routeros.provisioning-adapter.js';
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
+import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
 import { SystemRouterOsClientFactory } from './infrastructure/provisioning/routeros/system-routeros-client.factory.js';
@@ -149,6 +150,7 @@ import { DatabaseHealthChecker } from './infrastructure/database/sqlite/database
 import { MigrationRunner } from './infrastructure/database/sqlite/migration/migration-runner.js';
 import { SqliteDatabase } from './infrastructure/database/sqlite/sqlite-database.js';
 import { SqliteUnitOfWork } from './infrastructure/database/sqlite/sqlite-unit-of-work.js';
+import { createSystemActorContextProvider } from './infrastructure/identity/static-actor-context.provider.js';
 import { UuidV7IdGenerator } from './infrastructure/identity/uuid-v7-id-generator.js';
 import { logger } from './infrastructure/logging/logger.js';
 import { ExponentialRetryPolicy } from './infrastructure/provisioning/retry/exponential-retry-policy.js';
@@ -218,8 +220,9 @@ const provisioningRetryPolicy = new ExponentialRetryPolicy(3);
 const billingInvoiceRepository = new SqliteInvoiceRepository(sqlite.session);
 const billingPaymentRepository = new SqlitePaymentRepository(sqlite.session);
 const billingSettings = new SqliteCompanyBillingSettings(sqlite.session);
-const actorContext: ActorContext = { getActorId: () => 'temporary-server-context' };
-const billingActorContext: BillingActorContext = { getActorId: () => 'temporary-server-context' };
+const systemActorContext = createSystemActorContextProvider();
+const actorContext: ActorContext = systemActorContext;
+const billingActorContext: BillingActorContext = systemActorContext;
 const dashboardReaders = new SqliteDashboardReaders(sqlite.connection, clock);
 const dashboardCache = new InMemoryDashboardCache();
 const dashboardController = new DashboardController({
@@ -494,6 +497,51 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.simple_queue.remove',
     new RouterOsSimpleQueueProvisioningAdapter(
       'routeros.simple_queue.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.pppoe.create',
+    new RouterOsPppoeProvisioningAdapter(
+      'routeros.pppoe.create',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.pppoe.update',
+    new RouterOsPppoeProvisioningAdapter(
+      'routeros.pppoe.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.pppoe.enable',
+    new RouterOsPppoeProvisioningAdapter(
+      'routeros.pppoe.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.pppoe.disable',
+    new RouterOsPppoeProvisioningAdapter(
+      'routeros.pppoe.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.pppoe.remove',
+    new RouterOsPppoeProvisioningAdapter(
+      'routeros.pppoe.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

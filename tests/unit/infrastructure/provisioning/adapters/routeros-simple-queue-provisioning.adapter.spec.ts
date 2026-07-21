@@ -44,6 +44,7 @@ describe('RouterOsSimpleQueueProvisioningAdapter', () => {
     const input: ProvisioningActionInput = {
       actionType: 'routeros.simple_queue.create',
       companyId: 'company-1',
+      configurationReference: undefined,
       idempotencyKey: 'key-1',
       inputSnapshotJson: JSON.stringify({
         actionType: 'routeros.simple_queue.create',
@@ -53,8 +54,8 @@ describe('RouterOsSimpleQueueProvisioningAdapter', () => {
         routerId: 'router-1',
         target: '192.168.1.10',
       }),
-      targetId: 'target-1',
-      targetType: 'RouterOS',
+      requestId: 'req-1',
+      target: { id: 'target-1', type: 'RouterOS' },
     };
 
     const result = await adapter.execute(input);
@@ -69,15 +70,18 @@ describe('RouterOsSimpleQueueProvisioningAdapter', () => {
     const input: ProvisioningActionInput = {
       actionType: 'routeros.simple_queue.create',
       companyId: 'company-1',
+      configurationReference: undefined,
       idempotencyKey: 'key-1',
       inputSnapshotJson: '{ invalid json }',
-      targetId: 'target-1',
-      targetType: 'RouterOS',
+      requestId: 'req-2',
+      target: { id: 'target-1', type: 'RouterOS' },
     };
 
     const result = await adapter.execute(input);
 
     expect(result.outcome).to.equal('permanentFailure');
-    expect(result.errorCode).to.equal('ROUTEROS_INVALID_PAYLOAD');
+    if (result.outcome === 'permanentFailure') {
+      expect(result.errorCode).to.equal('ROUTEROS_INVALID_PAYLOAD');
+    }
   });
 });

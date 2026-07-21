@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { routerOsSimpleQueueInputSchema } from '../../../../../backend/domain/provisioning/routeros/routeros-simple-queue.input.js';
+import { routerOsSimpleQueueInputSchema } from '../../../../../backend/infrastructure/provisioning/routeros/routeros-simple-queue.input.js';
 
 describe('routerOsSimpleQueueInputSchema', () => {
   it('should validate a valid create payload', () => {

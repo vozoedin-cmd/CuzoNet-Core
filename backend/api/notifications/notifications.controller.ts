@@ -10,9 +10,11 @@ import type {
   UpdateNotificationDestinationUseCase,
 } from '../../application/use-cases/notifications/manage-notification-destinations.usecase.js';
 import type { RetryNotificationUseCase } from '../../application/use-cases/notifications/retry-notification.usecase.js';
-import type { Notification } from '../../domain/notifications/notification.js';
-import type { NotificationAttempt } from '../../domain/notifications/notification-attempt.js';
-import type { NotificationDestination } from '../../domain/notifications/notification-destination.js';
+import {
+  NotificationAttemptMapper,
+  NotificationDestinationMapper,
+  NotificationMapper,
+} from '../../application/mappers/notifications/notification.mapper.js';
 import {
   cancelNotificationBodySchema,
   companyQuerySchema,
@@ -50,7 +52,7 @@ export class NotificationsController {
       offset: query.offset,
       ...(query.status === undefined ? {} : { status: query.status }),
     });
-    response.status(200).json({ items: notifications.map(toNotificationDto) });
+    response.status(200).json({ items: notifications.map((notification) => NotificationMapper.toDto(notification)) });
   };
 
   public readonly getNotification: RequestHandler = async (request, response) => {
@@ -61,8 +63,8 @@ export class NotificationsController {
       params.notificationId,
     );
     response.status(200).json({
-      ...toNotificationDto(result.notification),
-      attempts: result.attempts.map(toAttemptDto),
+      ...NotificationMapper.toDto(result.notification),
+      attempts: result.attempts.map((attempt) => NotificationAttemptMapper.toDto(attempt)),
     });
   };
 
@@ -73,7 +75,7 @@ export class NotificationsController {
       body.companyId,
       params.notificationId,
     );
-    response.status(200).json(toNotificationDto(notification));
+    response.status(200).json(NotificationMapper.toDto(notification));
   };
 
   public readonly cancelNotification: RequestHandler = async (request, response) => {
@@ -84,13 +86,13 @@ export class NotificationsController {
       params.notificationId,
       body.reason,
     );
-    response.status(200).json(toNotificationDto(notification));
+    response.status(200).json(NotificationMapper.toDto(notification));
   };
 
   public readonly listDestinations: RequestHandler = async (request, response) => {
     const query = parseNotificationRequest(companyQuerySchema, request.query);
     const destinations = await this.dependencies.listDestinations.execute(query.companyId);
-    response.status(200).json({ items: destinations.map(toDestinationDto) });
+    response.status(200).json({ items: destinations.map((destination) => NotificationDestinationMapper.toDto(destination)) });
   };
 
   public readonly createDestination: RequestHandler = async (request, response) => {
@@ -101,7 +103,7 @@ export class NotificationsController {
       ...(minimumSeverity === undefined ? {} : { minimumSeverity }),
       ...(address === undefined ? {} : { address }),
     });
-    response.status(201).json(toDestinationDto(destination));
+    response.status(201).json(NotificationDestinationMapper.toDto(destination));
   };
 
   public readonly updateDestination: RequestHandler = async (request, response) => {
@@ -113,7 +115,7 @@ export class NotificationsController {
       ...(minimumSeverity === undefined ? {} : { minimumSeverity }),
       ...(address === undefined ? {} : { address }),
     });
-    response.status(200).json(toDestinationDto(destination));
+    response.status(200).json(NotificationDestinationMapper.toDto(destination));
   };
 
   public readonly deleteDestination: RequestHandler = async (request, response) => {
@@ -121,63 +123,5 @@ export class NotificationsController {
     const query = parseNotificationRequest(companyQuerySchema, request.query);
     await this.dependencies.deleteDestination.execute(query.companyId, params.destinationId);
     response.status(204).send();
-  };
-}
-
-function toNotificationDto(notification: Notification): Record<string, unknown> {
-  const props = notification.props;
-  return {
-    attempts: props.attempts,
-    channel: props.channel,
-    companyId: props.companyId,
-    createdAt: props.createdAt.toISOString(),
-    destinationId: props.destinationId,
-    failedAt: props.failedAt?.toISOString() ?? null,
-    id: props.id,
-    incidentId: props.incidentId,
-    lastError: props.lastError ?? null,
-    maxAttempts: props.maxAttempts,
-    payload: props.payload,
-    priority: props.priority,
-    scheduledAt: props.scheduledAt.toISOString(),
-    sentAt: props.sentAt?.toISOString() ?? null,
-    sourceEventId: props.sourceEventId,
-    sourceEventType: props.sourceEventType,
-    status: props.status,
-    templateCode: props.templateCode,
-    updatedAt: props.updatedAt.toISOString(),
-  };
-}
-
-function toAttemptDto(attempt: NotificationAttempt): Record<string, unknown> {
-  const props = attempt.props;
-  return {
-    attemptNumber: props.attemptNumber,
-    completedAt: props.completedAt?.toISOString() ?? null,
-    errorCode: props.errorCode ?? null,
-    errorMessage: props.errorMessage ?? null,
-    id: props.id,
-    metadata: props.metadata ?? null,
-    responseCode: props.responseCode ?? null,
-    retryAt: props.retryAt?.toISOString() ?? null,
-    startedAt: props.startedAt.toISOString(),
-    status: props.status,
-  };
-}
-
-function toDestinationDto(destination: NotificationDestination): Record<string, unknown> {
-  const props = destination.props;
-  return {
-    address: props.address ?? null,
-    channel: props.channel,
-    companyId: props.companyId,
-    configurationReference: props.configurationReference,
-    createdAt: props.createdAt.toISOString(),
-    enabled: props.enabled,
-    eventTypes: props.eventTypes,
-    id: props.id,
-    minimumSeverity: props.minimumSeverity ?? null,
-    name: props.name,
-    updatedAt: props.updatedAt.toISOString(),
   };
 }

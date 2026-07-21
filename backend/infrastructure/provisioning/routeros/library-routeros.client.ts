@@ -7,9 +7,13 @@ import type {
   RouterOsSimpleQueueCreateData,
   RouterOsSimpleQueueReference,
   RouterOsSimpleQueueUpdateData,
+  RouterOsPppoeSecret,
+  RouterOsPppoeSecretCreateData,
+  RouterOsPppoeSecretReference,
+  RouterOsPppoeSecretUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 
-export class LibraryRouterOsSimpleQueueClient implements RouterOsClientPort {
+export class LibraryRouterOsClient implements RouterOsClientPort {
   public constructor(
     private readonly client: BaseRouterOsClient,
     private readonly timeoutMs: number,
@@ -18,7 +22,7 @@ export class LibraryRouterOsSimpleQueueClient implements RouterOsClientPort {
   public static async connect(
     profile: RouterConnectionProfile,
     secret: string,
-  ): Promise<LibraryRouterOsSimpleQueueClient> {
+  ): Promise<LibraryRouterOsClient> {
     const client = new BaseRouterOsClient({
       host: profile.host,
       password: secret,
@@ -28,7 +32,7 @@ export class LibraryRouterOsSimpleQueueClient implements RouterOsClientPort {
       username: profile.username,
     });
     await client.connect();
-    return new LibraryRouterOsSimpleQueueClient(client, profile.timeoutMs);
+    return new LibraryRouterOsClient(client, profile.timeoutMs);
   }
 
   public async close(): Promise<void> {
@@ -143,6 +147,110 @@ export class LibraryRouterOsSimpleQueueClient implements RouterOsClientPort {
     }
 
     await this.client.execute('/queue/simple/set', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async createPppoeSecret(secret: RouterOsPppoeSecretCreateData): Promise<void> {
+    const attributes: Record<string, string> = {
+      name: secret.name,
+      profile: secret.profile,
+      service: secret.service ?? 'pppoe',
+    };
+    if (secret.comment !== undefined) attributes.comment = secret.comment;
+    if (secret.password !== undefined) attributes.password = secret.password;
+    if (secret.disabled !== undefined) attributes.disabled = secret.disabled ? 'yes' : 'no';
+
+    await this.client.execute('/ppp/secret/add', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async disablePppoeSecret(reference: RouterOsPppoeSecretReference): Promise<void> {
+    const secret = await this.findPppoeSecret(reference);
+    if (!secret) return;
+    
+    await this.client.execute('/ppp/secret/disable', {
+      attributes: { numbers: secret.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async enablePppoeSecret(reference: RouterOsPppoeSecretReference): Promise<void> {
+    const secret = await this.findPppoeSecret(reference);
+    if (!secret) return;
+    
+    await this.client.execute('/ppp/secret/enable', {
+      attributes: { numbers: secret.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findPppoeSecret(
+    reference: RouterOsPppoeSecretReference,
+  ): Promise<RouterOsPppoeSecret | null> {
+    const query = reference.id !== undefined 
+      ? `?.id=${reference.id}` 
+      : `?name=${reference.name}`;
+      
+    if (reference.id === undefined && reference.name === undefined) {
+      return null;
+    }
+
+    const replies = await this.client.print('/ppp/secret/print', {
+      attributes: {
+        '.proplist': '.id,name,service,profile,password,disabled,comment',
+      },
+      queries: [query],
+      timeoutMs: this.timeoutMs,
+    });
+
+    const reply = replies[0];
+    if (!reply) {
+      return null;
+    }
+
+    return {
+      comment: reply.comment ?? '',
+      disabled: reply.disabled === 'true',
+      id: reply['.id'] ?? '',
+      name: reply.name ?? '',
+      password: reply.password ?? '',
+      profile: reply.profile ?? '',
+      service: reply.service ?? '',
+    };
+  }
+
+  public async removePppoeSecret(reference: RouterOsPppoeSecretReference): Promise<void> {
+    const secret = await this.findPppoeSecret(reference);
+    if (!secret) return;
+    
+    await this.client.execute('/ppp/secret/remove', {
+      attributes: { numbers: secret.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updatePppoeSecret(
+    reference: RouterOsPppoeSecretReference,
+    data: RouterOsPppoeSecretUpdateData,
+  ): Promise<void> {
+    const secret = await this.findPppoeSecret(reference);
+    if (!secret) return;
+
+    const attributes: Record<string, string> = { numbers: secret.id };
+    if (data.comment !== undefined) attributes.comment = data.comment;
+    if (data.name !== undefined) attributes.name = data.name;
+    if (data.password !== undefined) attributes.password = data.password;
+    if (data.profile !== undefined) attributes.profile = data.profile;
+    if (data.service !== undefined) attributes.service = data.service;
+    if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
+
+    if (Object.keys(attributes).length === 1) return;
+
+    await this.client.execute('/ppp/secret/set', {
       attributes,
       timeoutMs: this.timeoutMs,
     });

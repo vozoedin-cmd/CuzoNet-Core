@@ -29,14 +29,14 @@ export const SqliteProvisioningRequestMapper = {
   },
 
   toPersistence(domain: ProvisioningRequest): ProvisioningRequestTable {
-    const props = domain.toDto();
+    const props = domain.toProps();
     return {
       action_type: props.actionType,
       attempt_count: props.attemptCount,
       company_id: props.companyId,
-      completed_at: props.completedAt ?? null,
+      completed_at: props.completedAt ? props.completedAt.toISOString() : null,
       configuration_reference: props.configurationReference ?? null,
-      created_at: props.createdAt,
+      created_at: props.createdAt.toISOString(),
       id: props.id,
       idempotency_key: props.idempotencyKey,
       input_hash: props.inputHash,
@@ -44,14 +44,14 @@ export const SqliteProvisioningRequestMapper = {
       last_error_code: props.lastErrorCode ?? null,
       last_error_message: props.lastErrorMessage ?? null,
       max_attempts: props.maxAttempts,
-      next_attempt_at: props.nextAttemptAt ?? null,
-      processing_started_at: props.processingStartedAt ?? null,
+      next_attempt_at: props.nextAttemptAt ? props.nextAttemptAt.toISOString() : null,
+      processing_started_at: props.processingStartedAt ? props.processingStartedAt.toISOString() : null,
       processing_worker_id: props.processingWorkerId ?? null,
       source_execution_id: props.sourceExecutionId ?? null,
       status: props.status,
       target_id: props.targetId,
       target_type: props.targetType,
-      updated_at: props.updatedAt,
+      updated_at: props.updatedAt.toISOString(),
     };
   },
 };

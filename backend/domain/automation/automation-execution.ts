@@ -1,5 +1,3 @@
-import type { AutomationExecutionDto } from '../../application/dto/automation/automation-execution.dto.js';
-
 export type AutomationExecutionStatus =
   | 'pending'
   | 'processing'
@@ -39,34 +37,6 @@ export class AutomationExecution {
 
   public static rehydrate(props: AutomationExecutionProps): AutomationExecution {
     return new AutomationExecution(props);
-  }
-
-  public static fromDto(dto: AutomationExecutionDto): AutomationExecution {
-    return new AutomationExecution({
-      actionSnapshotJson: dto.actionSnapshotJson,
-      actionType: dto.actionType,
-      attemptCount: dto.attemptCount,
-      cancelledAt: dto.cancelledAt ? new Date(dto.cancelledAt) : undefined,
-      companyId: dto.companyId,
-      completedAt: dto.completedAt ? new Date(dto.completedAt) : undefined,
-      createdAt: new Date(dto.createdAt),
-      eventId: dto.eventId,
-      eventSnapshotJson: dto.eventSnapshotJson,
-      eventType: dto.eventType,
-      id: dto.id,
-      lastErrorCode: dto.lastErrorCode,
-      lastErrorMessage: dto.lastErrorMessage,
-      maxAttempts: dto.maxAttempts,
-      nextAttemptAt: dto.nextAttemptAt ? new Date(dto.nextAttemptAt) : undefined,
-      processingLeaseUntil: dto.processingLeaseUntil ? new Date(dto.processingLeaseUntil) : undefined,
-      processingStartedAt: dto.processingStartedAt ? new Date(dto.processingStartedAt) : undefined,
-      processingWorkerId: dto.processingWorkerId,
-      providerExecutionId: dto.providerExecutionId,
-      ruleId: dto.ruleId,
-      startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
-      status: dto.status,
-      updatedAt: new Date(dto.updatedAt),
-    });
   }
 
   public static create(
@@ -226,31 +196,7 @@ export class AutomationExecution {
     this.props.processingLeaseUntil = undefined;
   }
 
-  public toDto(): AutomationExecutionDto {
-    return {
-      actionSnapshotJson: this.props.actionSnapshotJson,
-      actionType: this.props.actionType,
-      attemptCount: this.props.attemptCount,
-      cancelledAt: this.props.cancelledAt?.toISOString(),
-      companyId: this.props.companyId,
-      completedAt: this.props.completedAt?.toISOString(),
-      createdAt: this.props.createdAt.toISOString(),
-      eventId: this.props.eventId,
-      eventSnapshotJson: this.props.eventSnapshotJson,
-      eventType: this.props.eventType,
-      id: this.props.id,
-      lastErrorCode: this.props.lastErrorCode,
-      lastErrorMessage: this.props.lastErrorMessage,
-      maxAttempts: this.props.maxAttempts,
-      nextAttemptAt: this.props.nextAttemptAt?.toISOString(),
-      processingLeaseUntil: this.props.processingLeaseUntil?.toISOString(),
-      processingStartedAt: this.props.processingStartedAt?.toISOString(),
-      processingWorkerId: this.props.processingWorkerId,
-      providerExecutionId: this.props.providerExecutionId,
-      ruleId: this.props.ruleId,
-      startedAt: this.props.startedAt?.toISOString(),
-      status: this.props.status,
-      updatedAt: this.props.updatedAt.toISOString(),
-    };
+  public toProps(): AutomationExecutionProps {
+    return { ...this.props };
   }
 }
