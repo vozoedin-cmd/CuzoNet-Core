@@ -40,6 +40,7 @@ import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisi
 import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
 import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
 import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
+import { RouterOsFirewallFilterProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-filter-provisioning.adapter.js';
 import { PinoProvisioningEventLogger } from './infrastructure/provisioning/logging/provisioning-event.logger.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
@@ -643,6 +644,60 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.firewall.address-list.remove',
     new RouterOsFirewallAddressListProvisioningAdapter(
       'routeros.firewall.address-list.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.add',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.add',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.update',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.move',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.move',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.enable',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.disable',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.filter.remove',
+    new RouterOsFirewallFilterProvisioningAdapter(
+      'routeros.firewall.filter.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

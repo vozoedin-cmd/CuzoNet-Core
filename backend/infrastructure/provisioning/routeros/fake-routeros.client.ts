@@ -16,7 +16,13 @@ import type {
   RouterOsAddressListEntryCreateData,
   RouterOsAddressListEntryReference,
   RouterOsAddressListEntryUpdateData,
+  RouterOsFilterRule,
+  RouterOsFilterRuleCreateData,
+  RouterOsFilterRuleMoveTarget,
+  RouterOsFilterRuleReference,
+  RouterOsFilterRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
+import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
@@ -24,6 +30,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public secrets: RouterOsPppoeSecret[] = [];
   public hotspotUsers: RouterOsHotspotUser[] = [];
   public addressListEntries: RouterOsAddressListEntry[] = [];
+  public filterRules: RouterOsFilterRule[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -386,5 +393,151 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.timeout !== undefined ? { timeout: data.timeout } : {}),
     };
     this.addressListEntries[index] = entryData;
+  }
+
+  public async createFilterRule(rule: RouterOsFilterRuleCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const ruleData: RouterOsFilterRule = {
+      action: rule.action,
+      chain: rule.chain,
+      comment: rule.comment,
+      ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
+      disabled: rule.disabled ?? false,
+      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
+      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      id: `*${this.nextId++}`,
+      ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
+      ...(FilterRuleComment.extractReference(rule.comment) !== null
+        ? { ruleReference: FilterRuleComment.extractReference(rule.comment)! }
+        : {}),
+      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
+      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+    };
+    this.insertAt(ruleData, rule.placeBeforeId);
+  }
+
+  public async disableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findFilterRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.filterRules.findIndex((r) => r.id === rule.id);
+    this.filterRules[index] = { ...rule, disabled: true };
+  }
+
+  public async enableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findFilterRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.filterRules.findIndex((r) => r.id === rule.id);
+    this.filterRules[index] = { ...rule, disabled: false };
+  }
+
+  public async findFilterRule(reference: RouterOsFilterRuleReference): Promise<RouterOsFilterRule | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = this.filterRules.find(
+      (r) =>
+        (reference.id !== undefined && r.id === reference.id) ||
+        (reference.id === undefined &&
+          reference.ruleReference !== undefined &&
+          r.ruleReference === reference.ruleReference),
+    );
+    return rule ?? null;
+  }
+
+  public async listFilterRules(): Promise<RouterOsFilterRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.filterRules];
+  }
+
+  public async moveFilterRule(
+    reference: RouterOsFilterRuleReference,
+    target: RouterOsFilterRuleMoveTarget,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findFilterRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.filterRules = this.filterRules.filter((r) => r.id !== rule.id);
+    this.insertAt(rule, target.placeBeforeId);
+  }
+
+  public async removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findFilterRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.filterRules = this.filterRules.filter((r) => r.id !== rule.id);
+  }
+
+  public async updateFilterRule(
+    reference: RouterOsFilterRuleReference,
+    data: RouterOsFilterRuleUpdateData,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findFilterRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.filterRules.findIndex((r) => r.id === rule.id);
+    const ruleData: RouterOsFilterRule = {
+      ...rule,
+      ...(data.action !== undefined ? { action: data.action } : {}),
+      ...(data.chain !== undefined ? { chain: data.chain } : {}),
+      ...(data.comment !== undefined
+        ? {
+            comment: data.comment,
+            ...(FilterRuleComment.extractReference(data.comment) !== null
+              ? { ruleReference: FilterRuleComment.extractReference(data.comment)! }
+              : {}),
+          }
+        : {}),
+      ...(data.connectionState !== undefined ? { connectionState: data.connectionState } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.dstAddress !== undefined ? { dstAddress: data.dstAddress } : {}),
+      ...(data.dstPort !== undefined ? { dstPort: data.dstPort } : {}),
+      ...(data.inInterface !== undefined ? { inInterface: data.inInterface } : {}),
+      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
+      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
+      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
+      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
+    };
+    this.filterRules[index] = ruleData;
+  }
+
+  private insertAt(rule: RouterOsFilterRule, placeBeforeId: string | undefined): void {
+    if (placeBeforeId === undefined) {
+      this.filterRules.push(rule);
+      return;
+    }
+    const targetIndex = this.filterRules.findIndex((r) => r.id === placeBeforeId);
+    if (targetIndex === -1) {
+      this.filterRules.push(rule);
+      return;
+    }
+    this.filterRules.splice(targetIndex, 0, rule);
   }
 }
