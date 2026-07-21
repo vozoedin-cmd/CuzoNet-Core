@@ -3,41 +3,43 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
-  RouterOsFilterRule,
-  RouterOsFilterRuleCreateData,
-  RouterOsFilterRuleUpdateData,
+  RouterOsNatRule,
+  RouterOsNatRuleCreateData,
+  RouterOsNatRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { ConnectionState } from '../../../domain/provisioning/routeros/value-objects/connection-state.js';
-import { FilterAction } from '../../../domain/provisioning/routeros/value-objects/filter-action.js';
-import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
-import { FilterRuleReference } from '../../../domain/provisioning/routeros/value-objects/filter-rule-reference.js';
 import { FirewallAddressSpec } from '../../../domain/provisioning/routeros/value-objects/firewall-address-spec.js';
-import { FirewallChain } from '../../../domain/provisioning/routeros/value-objects/firewall-chain.js';
 import { InterfaceName } from '../../../domain/provisioning/routeros/value-objects/interface-name.js';
+import { NatAction } from '../../../domain/provisioning/routeros/value-objects/nat-action.js';
+import type { NatChainName } from '../../../domain/provisioning/routeros/value-objects/nat-chain.js';
+import { NatChain } from '../../../domain/provisioning/routeros/value-objects/nat-chain.js';
+import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
+import { NatRuleReference } from '../../../domain/provisioning/routeros/value-objects/nat-rule-reference.js';
+import { NatToAddress } from '../../../domain/provisioning/routeros/value-objects/nat-to-address.js';
 import { PortSpecification } from '../../../domain/provisioning/routeros/value-objects/port-specification.js';
 import { Protocol } from '../../../domain/provisioning/routeros/value-objects/protocol.js';
-import { RouterOsFilterRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-conflict.error.js';
-import { RouterOsFilterRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-not-found.error.js';
-import { RouterOsInvalidFilterRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-filter-rule.error.js';
+import { RouterOsInvalidNatRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-nat-rule.error.js';
+import { RouterOsNatRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-conflict.error.js';
+import { RouterOsNatRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-not-found.error.js';
 import {
-  routerOsFilterRuleInputSchema,
-  type RouterOsFilterRuleAddInput,
-  type RouterOsFilterRuleDisableInput,
-  type RouterOsFilterRuleEnableInput,
-  type RouterOsFilterRuleInput,
-  type RouterOsFilterRuleMoveInput,
-  type RouterOsFilterRuleRemoveInput,
-  type RouterOsFilterRuleUpdateInput,
-} from '../routeros/routeros-filter-rule.input.js';
+  routerOsNatRuleInputSchema,
+  type RouterOsNatRuleAddInput,
+  type RouterOsNatRuleDisableInput,
+  type RouterOsNatRuleEnableInput,
+  type RouterOsNatRuleInput,
+  type RouterOsNatRuleMoveInput,
+  type RouterOsNatRuleRemoveInput,
+  type RouterOsNatRuleUpdateInput,
+} from '../routeros/routeros-nat-rule.input.js';
 import { RouterOsProvisioningAdapterBase } from './routeros-provisioning-adapter.base.js';
 import { resolveMoveTarget, resolvePlaceBeforeId } from './routeros-rule-ordering.util.js';
 
-type MutableFilterRuleUpdateData = {
-  -readonly [K in keyof RouterOsFilterRuleUpdateData]: RouterOsFilterRuleUpdateData[K];
+type MutableNatRuleUpdateData = {
+  -readonly [K in keyof RouterOsNatRuleUpdateData]: RouterOsNatRuleUpdateData[K];
 };
 
-interface DesiredFilterRuleFields {
+interface DesiredNatRuleFields {
   readonly action: string;
   readonly chain: string;
   readonly connectionState: string | undefined;
@@ -49,9 +51,11 @@ interface DesiredFilterRuleFields {
   readonly protocol: string | undefined;
   readonly srcAddress: string | undefined;
   readonly srcPort: string | undefined;
+  readonly toAddresses: string | undefined;
+  readonly toPorts: string | undefined;
 }
 
-export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsFilterRuleInput> {
+export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsNatRuleInput> {
   protected readonly referenceMetadataKey = 'ruleReference';
 
   public constructor(
@@ -60,48 +64,46 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     secretProvider: SecretProviderPort,
     clientFactory: RouterOsClientFactoryPort,
   ) {
-    super(type, routerOsFilterRuleInputSchema, connectionResolver, secretProvider, clientFactory);
+    super(type, routerOsNatRuleInputSchema, connectionResolver, secretProvider, clientFactory);
   }
 
-  protected executeOperation(
-    client: RouterOsClientPort,
-    command: RouterOsFilterRuleInput,
-  ): Promise<string | undefined> {
+  protected executeOperation(client: RouterOsClientPort, command: RouterOsNatRuleInput): Promise<string | undefined> {
     switch (command.actionType) {
-      case 'routeros.firewall.filter.add':
+      case 'routeros.firewall.nat.add':
         return this.handleAdd(client, command);
-      case 'routeros.firewall.filter.update':
+      case 'routeros.firewall.nat.update':
         return this.handleUpdate(client, command);
-      case 'routeros.firewall.filter.move':
+      case 'routeros.firewall.nat.move':
         return this.handleMove(client, command);
-      case 'routeros.firewall.filter.enable':
+      case 'routeros.firewall.nat.enable':
         return this.handleEnable(client, command);
-      case 'routeros.firewall.filter.disable':
+      case 'routeros.firewall.nat.disable':
         return this.handleDisable(client, command);
-      case 'routeros.firewall.filter.remove':
+      case 'routeros.firewall.nat.remove':
         return this.handleRemove(client, command);
     }
   }
 
-  private async handleAdd(client: RouterOsClientPort, command: RouterOsFilterRuleAddInput): Promise<string> {
-    const ruleReference = FilterRuleReference.create(command.ruleReference);
+  private async handleAdd(client: RouterOsClientPort, command: RouterOsNatRuleAddInput): Promise<string> {
+    const ruleReference = NatRuleReference.create(command.ruleReference);
     const desired = this.buildDesiredFields(command);
-    const comment = FilterRuleComment.create(ruleReference, command.comment);
+    this.assertCoherent(desired.chain as NatChainName, desired.action, desired.toAddresses);
+    const comment = NatRuleComment.create(ruleReference, command.comment);
 
-    const existing = await client.findFilterRule({ ruleReference: ruleReference.value });
+    const existing = await client.findNatRule({ ruleReference: ruleReference.value });
     if (existing) {
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
       }
-      throw new RouterOsFilterRuleConflictError(
-        `Conflicto: ya existe una regla con la referencia ${ruleReference.value} y configuración distinta.`,
+      throw new RouterOsNatRuleConflictError(
+        `Conflicto: ya existe una regla NAT con la referencia ${ruleReference.value} y configuración distinta.`,
       );
     }
 
     const placeBeforeId =
-      command.position === undefined ? undefined : resolvePlaceBeforeId(await client.listFilterRules(), command.position);
+      command.position === undefined ? undefined : resolvePlaceBeforeId(await client.listNatRules(), command.position);
 
-    const createData: RouterOsFilterRuleCreateData = {
+    const createData: RouterOsNatRuleCreateData = {
       action: desired.action,
       chain: desired.chain,
       comment: comment.value,
@@ -115,24 +117,25 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       ...(desired.protocol !== undefined ? { protocol: desired.protocol } : {}),
       ...(desired.srcAddress !== undefined ? { srcAddress: desired.srcAddress } : {}),
       ...(desired.srcPort !== undefined ? { srcPort: desired.srcPort } : {}),
+      ...(desired.toAddresses !== undefined ? { toAddresses: desired.toAddresses } : {}),
+      ...(desired.toPorts !== undefined ? { toPorts: desired.toPorts } : {}),
     };
-    await client.createFilterRule(createData);
+    await client.createNatRule(createData);
     return ruleReference.value;
   }
 
-  private async handleUpdate(client: RouterOsClientPort, command: RouterOsFilterRuleUpdateInput): Promise<string> {
-    const ruleReference = FilterRuleReference.create(command.ruleReference);
+  private async handleUpdate(client: RouterOsClientPort, command: RouterOsNatRuleUpdateInput): Promise<string> {
+    const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
 
-    const updateData: MutableFilterRuleUpdateData = {};
-    if (command.chain !== undefined) {
-      const chain = FirewallChain.create(command.chain).value;
-      if (chain !== existing.chain) updateData.chain = chain;
-    }
-    if (command.action !== undefined) {
-      const action = FilterAction.create(command.action).value;
-      if (action !== existing.action) updateData.action = action;
-    }
+    const resultingChain = command.chain !== undefined ? NatChain.create(command.chain).value : existing.chain;
+    const resultingAction = command.action !== undefined ? NatAction.create(command.action).value : existing.action;
+    const resultingToAddresses = command.toAddresses !== undefined ? command.toAddresses : existing.toAddresses;
+    this.assertCoherent(resultingChain as NatChainName, resultingAction, resultingToAddresses);
+
+    const updateData: MutableNatRuleUpdateData = {};
+    if (command.chain !== undefined && resultingChain !== existing.chain) updateData.chain = resultingChain;
+    if (command.action !== undefined && resultingAction !== existing.action) updateData.action = resultingAction;
     if (command.protocol !== undefined) {
       const protocol = Protocol.create(command.protocol).value;
       if (protocol !== (existing.protocol ?? '')) updateData.protocol = protocol;
@@ -165,11 +168,19 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       const connectionState = ConnectionState.create(command.connectionState).value;
       if (connectionState !== (existing.connectionState ?? '')) updateData.connectionState = connectionState;
     }
+    if (command.toAddresses !== undefined) {
+      const toAddresses = NatToAddress.create(command.toAddresses).value;
+      if (toAddresses !== (existing.toAddresses ?? '')) updateData.toAddresses = toAddresses;
+    }
+    if (command.toPorts !== undefined) {
+      const toPorts = PortSpecification.create(command.toPorts).value;
+      if (toPorts !== (existing.toPorts ?? '')) updateData.toPorts = toPorts;
+    }
     if (command.disabled !== undefined && command.disabled !== existing.disabled) {
       updateData.disabled = command.disabled;
     }
     if (command.comment !== undefined) {
-      const comment = FilterRuleComment.create(ruleReference, command.comment).value;
+      const comment = NatRuleComment.create(ruleReference, command.comment).value;
       if (comment !== (existing.comment ?? '')) updateData.comment = comment;
     }
 
@@ -177,66 +188,77 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       return ruleReference.value; // Idempotent success: nothing changed
     }
 
-    await client.updateFilterRule({ id: existing.id }, updateData);
+    await client.updateNatRule({ id: existing.id }, updateData);
     return ruleReference.value;
   }
 
-  private async handleMove(client: RouterOsClientPort, command: RouterOsFilterRuleMoveInput): Promise<string> {
-    const ruleReference = FilterRuleReference.create(command.ruleReference);
+  private async handleMove(client: RouterOsClientPort, command: RouterOsNatRuleMoveInput): Promise<string> {
+    const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
 
-    const rules = await client.listFilterRules();
+    const rules = await client.listNatRules();
     const target = resolveMoveTarget(rules, existing.id, command.position);
     if (target.alreadyAtPosition) {
       return ruleReference.value; // Idempotent success: already at the desired position
     }
 
-    await client.moveFilterRule(
+    await client.moveNatRule(
       { id: existing.id },
       target.placeBeforeId !== undefined ? { placeBeforeId: target.placeBeforeId } : {},
     );
     return ruleReference.value;
   }
 
-  private async handleEnable(client: RouterOsClientPort, command: RouterOsFilterRuleEnableInput): Promise<string> {
+  private async handleEnable(client: RouterOsClientPort, command: RouterOsNatRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
-    await client.enableFilterRule({ id: existing.id });
+    await client.enableNatRule({ id: existing.id });
     return command.ruleReference;
   }
 
-  private async handleDisable(client: RouterOsClientPort, command: RouterOsFilterRuleDisableInput): Promise<string> {
+  private async handleDisable(client: RouterOsClientPort, command: RouterOsNatRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
-    await client.disableFilterRule({ id: existing.id });
+    await client.disableNatRule({ id: existing.id });
     return command.ruleReference;
   }
 
-  private async handleRemove(client: RouterOsClientPort, command: RouterOsFilterRuleRemoveInput): Promise<string> {
-    const existing = await client.findFilterRule({ ruleReference: command.ruleReference });
+  private async handleRemove(client: RouterOsClientPort, command: RouterOsNatRuleRemoveInput): Promise<string> {
+    const existing = await client.findNatRule({ ruleReference: command.ruleReference });
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
-    await client.removeFilterRule({ id: existing.id });
+    await client.removeNatRule({ id: existing.id });
     return command.ruleReference;
   }
 
-  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<RouterOsFilterRule> {
-    const existing = await client.findFilterRule({ ruleReference });
+  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<RouterOsNatRule> {
+    const existing = await client.findNatRule({ ruleReference });
     if (!existing) {
-      throw new RouterOsFilterRuleNotFoundError(`Regla no encontrada para la referencia: ${ruleReference}`);
+      throw new RouterOsNatRuleNotFoundError(`Regla NAT no encontrada para la referencia: ${ruleReference}`);
     }
     return existing;
   }
 
-  private buildDesiredFields(command: RouterOsFilterRuleAddInput): DesiredFilterRuleFields {
+  /** Enforces RouterOS's chain/action compatibility (e.g. masquerade is srcnat-only) and that translating actions carry a target. */
+  private assertCoherent(chain: NatChainName, action: string, toAddresses: string | undefined): void {
+    const natAction = NatAction.create(action);
+    if (!natAction.isCompatibleWith(chain)) {
+      throw new RouterOsInvalidNatRuleError(`La acción "${action}" no es válida para la chain "${chain}".`);
+    }
+    if (natAction.requiresToAddresses() && (toAddresses === undefined || toAddresses.length === 0)) {
+      throw new RouterOsInvalidNatRuleError(`La acción "${action}" requiere especificar toAddresses.`);
+    }
+  }
+
+  private buildDesiredFields(command: RouterOsNatRuleAddInput): DesiredNatRuleFields {
     return {
-      action: FilterAction.create(command.action).value,
-      chain: FirewallChain.create(command.chain).value,
+      action: NatAction.create(command.action).value,
+      chain: NatChain.create(command.chain).value,
       connectionState: command.connectionState === undefined ? undefined : ConnectionState.create(command.connectionState).value,
       disabled: command.disabled ?? false,
       dstAddress: command.dstAddress === undefined ? undefined : FirewallAddressSpec.create(command.dstAddress).value,
@@ -246,10 +268,12 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       protocol: command.protocol === undefined ? undefined : Protocol.create(command.protocol).value,
       srcAddress: command.srcAddress === undefined ? undefined : FirewallAddressSpec.create(command.srcAddress).value,
       srcPort: command.srcPort === undefined ? undefined : PortSpecification.create(command.srcPort).value,
+      toAddresses: command.toAddresses === undefined ? undefined : NatToAddress.create(command.toAddresses).value,
+      toPorts: command.toPorts === undefined ? undefined : PortSpecification.create(command.toPorts).value,
     };
   }
 
-  private isEquivalent(existing: RouterOsFilterRule, desired: DesiredFilterRuleFields): boolean {
+  private isEquivalent(existing: RouterOsNatRule, desired: DesiredNatRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
       existing.action === desired.action &&
@@ -261,11 +285,13 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       (existing.inInterface ?? '') === (desired.inInterface ?? '') &&
       (existing.outInterface ?? '') === (desired.outInterface ?? '') &&
       (existing.connectionState ?? '') === (desired.connectionState ?? '') &&
+      (existing.toAddresses ?? '') === (desired.toAddresses ?? '') &&
+      (existing.toPorts ?? '') === (desired.toPorts ?? '') &&
       existing.disabled === desired.disabled
     );
   }
 
-  protected override additionalLogFields(command: RouterOsFilterRuleInput): Record<string, unknown> {
+  protected override additionalLogFields(command: RouterOsNatRuleInput): Record<string, unknown> {
     return {
       ruleReference: command.ruleReference,
       ...('chain' in command && command.chain !== undefined ? { chain: command.chain } : {}),
@@ -273,16 +299,23 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   }
 
   protected override mapExecutionError(error: unknown): ProvisioningActionResult {
-    if (error instanceof RouterOsFilterRuleConflictError) {
+    if (error instanceof RouterOsNatRuleConflictError) {
       return {
-        errorCode: 'ROUTEROS_FILTER_RULE_CONFLICT',
+        errorCode: 'ROUTEROS_NAT_RULE_CONFLICT',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
     }
-    if (error instanceof RouterOsFilterRuleNotFoundError) {
+    if (error instanceof RouterOsNatRuleNotFoundError) {
       return {
-        errorCode: 'ROUTEROS_FILTER_RULE_NOT_FOUND',
+        errorCode: 'ROUTEROS_NAT_RULE_NOT_FOUND',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsInvalidNatRuleError) {
+      return {
+        errorCode: 'ROUTEROS_INVALID_NAT_RULE',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
@@ -295,11 +328,11 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
         message.includes('address') ||
         message.includes('chain'))
     ) {
-      const invalid = new RouterOsInvalidFilterRuleError(
-        error instanceof Error ? error.message : 'Regla de firewall inválida.',
+      const invalid = new RouterOsInvalidNatRuleError(
+        error instanceof Error ? error.message : 'Regla NAT inválida.',
       );
       return {
-        errorCode: 'ROUTEROS_INVALID_FILTER_RULE',
+        errorCode: 'ROUTEROS_INVALID_NAT_RULE',
         errorMessage: invalid.message,
         outcome: 'permanentFailure',
       };

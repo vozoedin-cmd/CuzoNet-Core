@@ -21,8 +21,14 @@ import type {
   RouterOsFilterRuleMoveTarget,
   RouterOsFilterRuleReference,
   RouterOsFilterRuleUpdateData,
+  RouterOsNatRule,
+  RouterOsNatRuleCreateData,
+  RouterOsNatRuleMoveTarget,
+  RouterOsNatRuleReference,
+  RouterOsNatRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
+import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
@@ -31,6 +37,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public hotspotUsers: RouterOsHotspotUser[] = [];
   public addressListEntries: RouterOsAddressListEntry[] = [];
   public filterRules: RouterOsFilterRule[] = [];
+  public natRules: RouterOsNatRule[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -417,7 +424,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
       ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
     };
-    this.insertAt(ruleData, rule.placeBeforeId);
+    this.insertRuleAt(this.filterRules, ruleData, rule.placeBeforeId);
   }
 
   public async disableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
@@ -477,7 +484,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       return;
     }
     this.filterRules = this.filterRules.filter((r) => r.id !== rule.id);
-    this.insertAt(rule, target.placeBeforeId);
+    this.insertRuleAt(this.filterRules, rule, target.placeBeforeId);
   }
 
   public async removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
@@ -528,16 +535,147 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.filterRules[index] = ruleData;
   }
 
-  private insertAt(rule: RouterOsFilterRule, placeBeforeId: string | undefined): void {
+  public async createNatRule(rule: RouterOsNatRuleCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const ruleData: RouterOsNatRule = {
+      action: rule.action,
+      chain: rule.chain,
+      comment: rule.comment,
+      ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
+      disabled: rule.disabled ?? false,
+      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
+      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      id: `*${this.nextId++}`,
+      ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
+      ...(NatRuleComment.extractReference(rule.comment) !== null
+        ? { ruleReference: NatRuleComment.extractReference(rule.comment)! }
+        : {}),
+      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
+      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+      ...(rule.toAddresses !== undefined ? { toAddresses: rule.toAddresses } : {}),
+      ...(rule.toPorts !== undefined ? { toPorts: rule.toPorts } : {}),
+    };
+    this.insertRuleAt(this.natRules, ruleData, rule.placeBeforeId);
+  }
+
+  public async disableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findNatRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.natRules.findIndex((r) => r.id === rule.id);
+    this.natRules[index] = { ...rule, disabled: true };
+  }
+
+  public async enableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findNatRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.natRules.findIndex((r) => r.id === rule.id);
+    this.natRules[index] = { ...rule, disabled: false };
+  }
+
+  public async findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = this.natRules.find(
+      (r) =>
+        (reference.id !== undefined && r.id === reference.id) ||
+        (reference.id === undefined &&
+          reference.ruleReference !== undefined &&
+          r.ruleReference === reference.ruleReference),
+    );
+    return rule ?? null;
+  }
+
+  public async listNatRules(): Promise<RouterOsNatRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.natRules];
+  }
+
+  public async moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findNatRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.natRules = this.natRules.filter((r) => r.id !== rule.id);
+    this.insertRuleAt(this.natRules, rule, target.placeBeforeId);
+  }
+
+  public async removeNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findNatRule(reference);
+    if (!rule) {
+      return;
+    }
+    this.natRules = this.natRules.filter((r) => r.id !== rule.id);
+  }
+
+  public async updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.findNatRule(reference);
+    if (!rule) {
+      return;
+    }
+    const index = this.natRules.findIndex((r) => r.id === rule.id);
+    const ruleData: RouterOsNatRule = {
+      ...rule,
+      ...(data.action !== undefined ? { action: data.action } : {}),
+      ...(data.chain !== undefined ? { chain: data.chain } : {}),
+      ...(data.comment !== undefined
+        ? {
+            comment: data.comment,
+            ...(NatRuleComment.extractReference(data.comment) !== null
+              ? { ruleReference: NatRuleComment.extractReference(data.comment)! }
+              : {}),
+          }
+        : {}),
+      ...(data.connectionState !== undefined ? { connectionState: data.connectionState } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.dstAddress !== undefined ? { dstAddress: data.dstAddress } : {}),
+      ...(data.dstPort !== undefined ? { dstPort: data.dstPort } : {}),
+      ...(data.inInterface !== undefined ? { inInterface: data.inInterface } : {}),
+      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
+      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
+      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
+      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
+      ...(data.toAddresses !== undefined ? { toAddresses: data.toAddresses } : {}),
+      ...(data.toPorts !== undefined ? { toPorts: data.toPorts } : {}),
+    };
+    this.natRules[index] = ruleData;
+  }
+
+  private insertRuleAt<T extends { id: string }>(rules: T[], rule: T, placeBeforeId: string | undefined): void {
     if (placeBeforeId === undefined) {
-      this.filterRules.push(rule);
+      rules.push(rule);
       return;
     }
-    const targetIndex = this.filterRules.findIndex((r) => r.id === placeBeforeId);
+    const targetIndex = rules.findIndex((r) => r.id === placeBeforeId);
     if (targetIndex === -1) {
-      this.filterRules.push(rule);
+      rules.push(rule);
       return;
     }
-    this.filterRules.splice(targetIndex, 0, rule);
+    rules.splice(targetIndex, 0, rule);
   }
 }

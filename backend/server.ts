@@ -41,6 +41,7 @@ import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/
 import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
 import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
 import { RouterOsFirewallFilterProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-filter-provisioning.adapter.js';
+import { RouterOsNatProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-nat-provisioning.adapter.js';
 import { PinoProvisioningEventLogger } from './infrastructure/provisioning/logging/provisioning-event.logger.js';
 import { EnvironmentRouterConnectionResolver } from './infrastructure/provisioning/routeros/environment-router-connection.resolver.js';
 import { EnvironmentSecretProvider } from './infrastructure/provisioning/routeros/environment-secret.provider.js';
@@ -698,6 +699,60 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.firewall.filter.remove',
     new RouterOsFirewallFilterProvisioningAdapter(
       'routeros.firewall.filter.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.add',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.add',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.update',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.move',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.move',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.enable',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.enable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.disable',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.disable',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.firewall.nat.remove',
+    new RouterOsNatProvisioningAdapter(
+      'routeros.firewall.nat.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

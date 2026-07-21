@@ -25,8 +25,14 @@ import type {
   RouterOsFilterRuleMoveTarget,
   RouterOsFilterRuleReference,
   RouterOsFilterRuleUpdateData,
+  RouterOsNatRule,
+  RouterOsNatRuleCreateData,
+  RouterOsNatRuleMoveTarget,
+  RouterOsNatRuleReference,
+  RouterOsNatRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
+import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 
 export class LibraryRouterOsClient implements RouterOsClientPort {
   public constructor(
@@ -614,6 +620,132 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       timeoutMs: this.timeoutMs,
     });
   }
+
+  public async createNatRule(rule: RouterOsNatRuleCreateData): Promise<void> {
+    const attributes: Record<string, string> = {
+      action: rule.action,
+      chain: rule.chain,
+      comment: rule.comment,
+    };
+    if (rule.protocol !== undefined) attributes.protocol = rule.protocol;
+    if (rule.srcAddress !== undefined) attributes['src-address'] = rule.srcAddress;
+    if (rule.dstAddress !== undefined) attributes['dst-address'] = rule.dstAddress;
+    if (rule.srcPort !== undefined) attributes['src-port'] = rule.srcPort;
+    if (rule.dstPort !== undefined) attributes['dst-port'] = rule.dstPort;
+    if (rule.inInterface !== undefined) attributes['in-interface'] = rule.inInterface;
+    if (rule.outInterface !== undefined) attributes['out-interface'] = rule.outInterface;
+    if (rule.connectionState !== undefined) attributes['connection-state'] = rule.connectionState;
+    if (rule.toAddresses !== undefined) attributes['to-addresses'] = rule.toAddresses;
+    if (rule.toPorts !== undefined) attributes['to-ports'] = rule.toPorts;
+    if (rule.disabled !== undefined) attributes.disabled = rule.disabled ? 'yes' : 'no';
+    if (rule.placeBeforeId !== undefined) attributes['place-before'] = rule.placeBeforeId;
+
+    await this.client.execute('/ip/firewall/nat/add', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async disableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    const rule = await this.findNatRule(reference);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/nat/disable', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async enableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    const rule = await this.findNatRule(reference);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/nat/enable', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null> {
+    if (reference.id === undefined && reference.ruleReference === undefined) {
+      return null;
+    }
+
+    if (reference.id !== undefined) {
+      const replies = await this.client.print('/ip/firewall/nat/print', {
+        attributes: { '.proplist': NAT_RULE_PROPLIST },
+        queries: [`?.id=${reference.id}`],
+        timeoutMs: this.timeoutMs,
+      });
+      const reply = replies[0];
+      return reply ? mapReplyToNatRule(reply) : null;
+    }
+
+    const rules = await this.listNatRules();
+    return rules.find((rule) => rule.ruleReference === reference.ruleReference) ?? null;
+  }
+
+  public async listNatRules(): Promise<RouterOsNatRule[]> {
+    const replies = await this.client.print('/ip/firewall/nat/print', {
+      attributes: { '.proplist': NAT_RULE_PROPLIST },
+      timeoutMs: this.timeoutMs,
+    });
+    return replies.map(mapReplyToNatRule);
+  }
+
+  public async moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void> {
+    const rule = await this.findNatRule(reference);
+    if (!rule) return;
+
+    let destination = target.placeBeforeId;
+    if (destination === undefined) {
+      const rules = await this.listNatRules();
+      destination = String(rules.length);
+    }
+
+    await this.client.execute('/ip/firewall/nat/move', {
+      attributes: { destination, numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async removeNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+    const rule = await this.findNatRule(reference);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/nat/remove', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void> {
+    const rule = await this.findNatRule(reference);
+    if (!rule) return;
+
+    const attributes: Record<string, string> = { numbers: rule.id };
+    if (data.action !== undefined) attributes.action = data.action;
+    if (data.chain !== undefined) attributes.chain = data.chain;
+    if (data.comment !== undefined) attributes.comment = data.comment;
+    if (data.protocol !== undefined) attributes.protocol = data.protocol;
+    if (data.srcAddress !== undefined) attributes['src-address'] = data.srcAddress;
+    if (data.dstAddress !== undefined) attributes['dst-address'] = data.dstAddress;
+    if (data.srcPort !== undefined) attributes['src-port'] = data.srcPort;
+    if (data.dstPort !== undefined) attributes['dst-port'] = data.dstPort;
+    if (data.inInterface !== undefined) attributes['in-interface'] = data.inInterface;
+    if (data.outInterface !== undefined) attributes['out-interface'] = data.outInterface;
+    if (data.connectionState !== undefined) attributes['connection-state'] = data.connectionState;
+    if (data.toAddresses !== undefined) attributes['to-addresses'] = data.toAddresses;
+    if (data.toPorts !== undefined) attributes['to-ports'] = data.toPorts;
+    if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
+
+    if (Object.keys(attributes).length === 1) return;
+
+    await this.client.execute('/ip/firewall/nat/set', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
 }
 
 const FILTER_RULE_PROPLIST =
@@ -637,5 +769,31 @@ function mapReplyToFilterRule(reply: RouterOSRecord): RouterOsFilterRule {
     ...(ruleReference !== null ? { ruleReference } : {}),
     ...(reply['src-address'] ? { srcAddress: reply['src-address'] } : {}),
     ...(reply['src-port'] ? { srcPort: reply['src-port'] } : {}),
+  };
+}
+
+const NAT_RULE_PROPLIST =
+  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,to-addresses,to-ports,disabled,comment';
+
+function mapReplyToNatRule(reply: RouterOSRecord): RouterOsNatRule {
+  const comment = reply.comment ?? '';
+  const ruleReference = NatRuleComment.extractReference(comment);
+  return {
+    action: reply.action ?? '',
+    chain: reply.chain ?? '',
+    comment,
+    ...(reply['connection-state'] ? { connectionState: reply['connection-state'] } : {}),
+    disabled: reply.disabled === 'true',
+    ...(reply['dst-address'] ? { dstAddress: reply['dst-address'] } : {}),
+    ...(reply['dst-port'] ? { dstPort: reply['dst-port'] } : {}),
+    id: reply['.id'] ?? '',
+    ...(reply['in-interface'] ? { inInterface: reply['in-interface'] } : {}),
+    ...(reply['out-interface'] ? { outInterface: reply['out-interface'] } : {}),
+    ...(reply.protocol ? { protocol: reply.protocol } : {}),
+    ...(ruleReference !== null ? { ruleReference } : {}),
+    ...(reply['src-address'] ? { srcAddress: reply['src-address'] } : {}),
+    ...(reply['src-port'] ? { srcPort: reply['src-port'] } : {}),
+    ...(reply['to-addresses'] ? { toAddresses: reply['to-addresses'] } : {}),
+    ...(reply['to-ports'] ? { toPorts: reply['to-ports'] } : {}),
   };
 }

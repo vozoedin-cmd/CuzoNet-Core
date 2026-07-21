@@ -192,6 +192,71 @@ export interface RouterOsFilterRuleMoveTarget {
   readonly placeBeforeId?: string;
 }
 
+export interface RouterOsNatRuleReference {
+  readonly id?: string;
+  readonly ruleReference?: string;
+}
+
+export interface RouterOsNatRule {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly connectionState?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly protocol?: string;
+  readonly ruleReference?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly toAddresses?: string;
+  readonly toPorts?: string;
+}
+
+export interface RouterOsNatRuleCreateData {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment: string;
+  readonly connectionState?: string;
+  readonly disabled?: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  /** .id of the existing rule this one should be inserted before; omit to append at the end. */
+  readonly placeBeforeId?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly toAddresses?: string;
+  readonly toPorts?: string;
+}
+
+export interface RouterOsNatRuleUpdateData {
+  readonly action?: string;
+  readonly chain?: string;
+  readonly comment?: string;
+  readonly connectionState?: string;
+  readonly disabled?: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly toAddresses?: string;
+  readonly toPorts?: string;
+}
+
+export interface RouterOsNatRuleMoveTarget {
+  /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
+  readonly placeBeforeId?: string;
+}
+
 export interface RouterOsClientPort {
   close(): Promise<void>;
 
@@ -235,6 +300,16 @@ export interface RouterOsClientPort {
   moveFilterRule(reference: RouterOsFilterRuleReference, target: RouterOsFilterRuleMoveTarget): Promise<void>;
   removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void>;
   updateFilterRule(reference: RouterOsFilterRuleReference, data: RouterOsFilterRuleUpdateData): Promise<void>;
+
+  createNatRule(rule: RouterOsNatRuleCreateData): Promise<void>;
+  disableNatRule(reference: RouterOsNatRuleReference): Promise<void>;
+  enableNatRule(reference: RouterOsNatRuleReference): Promise<void>;
+  findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null>;
+  /** Global, physically-ordered listing of all NAT rules (across srcnat and dstnat), used to resolve position/move targets. */
+  listNatRules(): Promise<RouterOsNatRule[]>;
+  moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void>;
+  removeNatRule(reference: RouterOsNatRuleReference): Promise<void>;
+  updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {
