@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import type { ProvisioningActionInput } from '../../../../../backend/application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
@@ -181,6 +181,196 @@ describe('RouterOsPppoeProvisioningAdapter', () => {
       expect(result.errorCode).to.equal('ROUTEROS_PASSWORD_SECRET_NOT_FOUND');
     }
     expect(fakeClient.secrets).to.have.length(0);
+  });
+
+  describe('routeros.pppoe.update', () => {
+    let updateAdapter: RouterOsPppoeProvisioningAdapter;
+
+    beforeEach(() => {
+      updateAdapter = new RouterOsPppoeProvisioningAdapter(
+        'routeros.pppoe.update',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+    });
+
+    function updateInput(payload: Record<string, unknown>, requestId: string): ProvisioningActionInput {
+      return {
+        actionType: 'routeros.pppoe.update',
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: requestId,
+        inputSnapshotJson: JSON.stringify({
+          actionType: 'routeros.pppoe.update',
+          routerId: 'router-lab',
+          ...payload,
+        }),
+        requestId,
+        target: { id: 'TEST-PPPOE-001', type: 'pppoe-secret' },
+      };
+    }
+
+    it('returns ROUTEROS_PPPOE_NOT_FOUND when the reference does not exist, and never calls updatePppoeSecret', async () => {
+      const updateSpy = vi.spyOn(fakeClient, 'updatePppoeSecret');
+
+      const result = await updateAdapter.execute(
+        updateInput({ comment: 'no importa', pppoeReference: 'TEST-PPPOE-001' }, 'req-update-not-found'),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_PPPOE_NOT_FOUND');
+      }
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent (no /ppp/secret/set) when the desired state already matches', async () => {
+      fakeClient.secrets.push({
+        comment: 'Prueba E2E PPPoE 001',
+        disabled: false,
+        id: '*A1',
+        name: 'TEST-PPPOE-001',
+        password: 'pass',
+        profile: 'perfil-residencial',
+        service: 'pppoe',
+      });
+      const updateSpy = vi.spyOn(fakeClient, 'updatePppoeSecret');
+
+      const result = await updateAdapter.execute(
+        updateInput(
+          {
+            comment: 'Prueba E2E PPPoE 001',
+            credentialReference: 'cred-pass',
+            pppoeReference: 'TEST-PPPOE-001',
+            profile: 'perfil-residencial',
+          },
+          'req-update-noop',
+        ),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('calls updatePppoeSecret with { name: ... } only, and with only the fields that actually differ', async () => {
+      fakeClient.secrets.push({
+        comment: 'Comentario viejo',
+        disabled: false,
+        id: '*A1',
+        name: 'TEST-PPPOE-001',
+        password: 'pass',
+        profile: 'perfil-residencial',
+        service: 'pppoe',
+      });
+      const updateSpy = vi.spyOn(fakeClient, 'updatePppoeSecret');
+
+      const result = await updateAdapter.execute(
+        updateInput({ comment: 'Comentario nuevo', pppoeReference: 'TEST-PPPOE-001' }, 'req-update-real-change'),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledWith({ name: 'TEST-PPPOE-001' }, { comment: 'Comentario nuevo' });
+      expect(fakeClient.secrets[0]?.comment).to.equal('Comentario nuevo');
+    });
+
+    it('looks up the secret by name only, never by id', async () => {
+      fakeClient.secrets.push({
+        comment: 'Comentario',
+        disabled: false,
+        id: '*A1',
+        name: 'TEST-PPPOE-001',
+        password: 'pass',
+        profile: 'perfil-residencial',
+        service: 'pppoe',
+      });
+      const findSpy = vi.spyOn(fakeClient, 'findPppoeSecret');
+
+      await updateAdapter.execute(
+        updateInput({ comment: 'Comentario nuevo', pppoeReference: 'TEST-PPPOE-001' }, 'req-update-lookup'),
+      );
+
+      expect(findSpy).toHaveBeenCalledWith({ name: 'TEST-PPPOE-001' });
+    });
+  });
+
+  describe('routeros.pppoe.enable / disable / remove', () => {
+    beforeEach(() => {
+      fakeClient.secrets.push({
+        comment: 'Comentario',
+        disabled: false,
+        id: '*A1',
+        name: 'TEST-PPPOE-001',
+        password: 'pass',
+        profile: 'perfil-residencial',
+        service: 'pppoe',
+      });
+    });
+
+    function actionInput(actionType: string, requestId: string): ProvisioningActionInput {
+      return {
+        actionType,
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: requestId,
+        inputSnapshotJson: JSON.stringify({
+          actionType,
+          pppoeReference: 'TEST-PPPOE-001',
+          routerId: 'router-lab',
+        }),
+        requestId,
+        target: { id: 'TEST-PPPOE-001', type: 'pppoe-secret' },
+      };
+    }
+
+    it('enable finds the secret by name only, never by id', async () => {
+      const enableAdapter = new RouterOsPppoeProvisioningAdapter(
+        'routeros.pppoe.enable',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const enableSpy = vi.spyOn(fakeClient, 'enablePppoeSecret');
+
+      const result = await enableAdapter.execute(actionInput('routeros.pppoe.enable', 'req-enable'));
+
+      expect(result.outcome).to.equal('success');
+      expect(enableSpy).toHaveBeenCalledWith({ name: 'TEST-PPPOE-001' });
+      expect(fakeClient.secrets[0]?.disabled).to.equal(false);
+    });
+
+    it('disable finds the secret by name only, never by id', async () => {
+      const disableAdapter = new RouterOsPppoeProvisioningAdapter(
+        'routeros.pppoe.disable',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const disableSpy = vi.spyOn(fakeClient, 'disablePppoeSecret');
+
+      const result = await disableAdapter.execute(actionInput('routeros.pppoe.disable', 'req-disable'));
+
+      expect(result.outcome).to.equal('success');
+      expect(disableSpy).toHaveBeenCalledWith({ name: 'TEST-PPPOE-001' });
+      expect(fakeClient.secrets[0]?.disabled).to.equal(true);
+    });
+
+    it('remove finds the secret by name only, never by id', async () => {
+      const removeAdapter = new RouterOsPppoeProvisioningAdapter(
+        'routeros.pppoe.remove',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const removeSpy = vi.spyOn(fakeClient, 'removePppoeSecret');
+
+      const result = await removeAdapter.execute(actionInput('routeros.pppoe.remove', 'req-remove'));
+
+      expect(result.outcome).to.equal('success');
+      expect(removeSpy).toHaveBeenCalledWith({ name: 'TEST-PPPOE-001' });
+      expect(fakeClient.secrets).to.have.length(0);
+    });
   });
 
   it('should reject invalid json payload', async () => {

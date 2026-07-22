@@ -3,11 +3,13 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
+  RouterOsPppoeSecret,
   RouterOsPppoeSecretCreateData,
   RouterOsPppoeSecretUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { RouterOsPppoeConflictError } from '../../../domain/provisioning/routeros/errors/routeros-pppoe-conflict.error.js';
+import { RouterOsPppoeNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-pppoe-not-found.error.js';
 import {
   routerOsPppoeInputSchema,
   type RouterOsPppoeCreateInput,
@@ -18,6 +20,35 @@ import {
   type RouterOsPppoeUpdateInput,
 } from '../routeros/routeros-pppoe.input.js';
 import { RouterOsProvisioningAdapterBase } from './routeros-provisioning-adapter.base.js';
+
+/**
+ * Un campo de update solo participa en la comparacion si vino en el comando (los campos
+ * de update son todos opcionales). `password` ya viene resuelto vía SecretProviderPort
+ * (no es el `credentialReference` crudo) para comparar contra el valor real que devuelve
+ * RouterOS. `service` no es parte del contrato de Update (fijo a 'pppoe' desde Create).
+ */
+function pppoeUpdateIsNoop(
+  existing: RouterOsPppoeSecret,
+  command: RouterOsPppoeUpdateInput,
+  resolvedPassword: string | undefined,
+): boolean {
+  if (command.name !== undefined && command.name !== existing.name) {
+    return false;
+  }
+  if (command.comment !== undefined && command.comment !== (existing.comment ?? '')) {
+    return false;
+  }
+  if (command.profile !== undefined && command.profile !== existing.profile) {
+    return false;
+  }
+  if (command.disabled !== undefined && command.disabled !== existing.disabled) {
+    return false;
+  }
+  if (resolvedPassword !== undefined && resolvedPassword !== existing.password) {
+    return false;
+  }
+  return true;
+}
 
 export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsPppoeInput> {
   protected readonly referenceMetadataKey = 'pppoeReference';
@@ -87,6 +118,17 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     const password =
       command.credentialReference === undefined ? undefined : await this.resolveCredential(command.credentialReference);
 
+    const existing = await client.findPppoeSecret({ name: command.pppoeReference });
+    if (!existing) {
+      throw new RouterOsPppoeNotFoundError(
+        `No existe un secreto PPPoE con referencia: ${command.pppoeReference}`,
+      );
+    }
+
+    if (pppoeUpdateIsNoop(existing, command, password)) {
+      return command.pppoeReference; // Idempotent success — nada que aplicar, no se envia /ppp/secret/set
+    }
+
     const updateData: RouterOsPppoeSecretUpdateData = {
       ...(command.comment !== undefined ? { comment: command.comment } : {}),
       ...(command.disabled !== undefined ? { disabled: command.disabled } : {}),
@@ -95,10 +137,7 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
       ...(command.profile !== undefined ? { profile: command.profile } : {}),
     };
 
-    await client.updatePppoeSecret(
-      { id: command.pppoeReference, name: command.pppoeReference },
-      updateData,
-    );
+    await client.updatePppoeSecret({ name: command.pppoeReference }, updateData);
     return command.pppoeReference;
   }
 
@@ -106,7 +145,7 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     client: RouterOsClientPort,
     command: RouterOsPppoeEnableInput,
   ): Promise<string> {
-    await client.enablePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    await client.enablePppoeSecret({ name: command.pppoeReference });
     return command.pppoeReference;
   }
 
@@ -114,7 +153,7 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     client: RouterOsClientPort,
     command: RouterOsPppoeDisableInput,
   ): Promise<string> {
-    await client.disablePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    await client.disablePppoeSecret({ name: command.pppoeReference });
     return command.pppoeReference;
   }
 
@@ -122,7 +161,7 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     client: RouterOsClientPort,
     command: RouterOsPppoeRemoveInput,
   ): Promise<string> {
-    await client.removePppoeSecret({ id: command.pppoeReference, name: command.pppoeReference });
+    await client.removePppoeSecret({ name: command.pppoeReference });
     return command.pppoeReference;
   }
 
@@ -130,6 +169,13 @@ export class RouterOsPppoeProvisioningAdapter extends RouterOsProvisioningAdapte
     if (error instanceof RouterOsPppoeConflictError) {
       return {
         errorCode: 'ROUTEROS_PPPOE_CONFLICT',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsPppoeNotFoundError) {
+      return {
+        errorCode: 'ROUTEROS_PPPOE_NOT_FOUND',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };

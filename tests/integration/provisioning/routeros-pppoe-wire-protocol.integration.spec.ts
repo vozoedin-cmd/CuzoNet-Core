@@ -203,4 +203,176 @@ describe('LibraryRouterOsClient wire protocol (PPPoE)', () => {
     }
     expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print']);
   });
+
+  function actionAdapter(actionType: string): RouterOsPppoeProvisioningAdapter {
+    const resolver: RouterConnectionResolverPort = { resolve: async () => harness.profile() };
+    const secretProvider: SecretProviderPort = { getSecret: async () => 'clave-secreta' };
+    const clientFactory: RouterOsClientFactoryPort = {
+      create: async (profile, secret) => LibraryRouterOsClient.connect(profile, secret),
+    };
+    return new RouterOsPppoeProvisioningAdapter(actionType, resolver, secretProvider, clientFactory);
+  }
+
+  function updateInput(payload: Record<string, unknown>): ProvisioningActionInput {
+    return {
+      actionType: 'routeros.pppoe.update',
+      companyId: 'company-1',
+      configurationReference: undefined,
+      idempotencyKey: 'key-update',
+      inputSnapshotJson: JSON.stringify({
+        actionType: 'routeros.pppoe.update',
+        routerId: 'router-01',
+        ...payload,
+      }),
+      requestId: 'req-update',
+      target: { id: 'TEST-PPPOE-001', type: 'pppoe-secret' },
+    };
+  }
+
+  it('update: si la referencia no existe, solo envia /ppp/secret/print con ?name=TEST-PPPOE-001 (nunca /ppp/secret/set ni ?.id=)', async () => {
+    const adapter = actionAdapter('routeros.pppoe.update');
+
+    const result = await adapter.execute(updateInput({ comment: 'no importa', pppoeReference: 'TEST-PPPOE-001' }));
+
+    expect(result.outcome).toBe('permanentFailure');
+    if (result.outcome === 'permanentFailure') {
+      expect(result.errorCode).toBe('ROUTEROS_PPPOE_NOT_FOUND');
+    }
+    expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print']);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+  });
+
+  it('update: si el estado deseado ya coincide, solo envia /ppp/secret/print (idempotente, sin /ppp/secret/set)', async () => {
+    harness.existingRecord = {
+      '.id': '*A1',
+      comment: 'Prueba E2E PPPoE Update 001',
+      disabled: 'no',
+      name: 'TEST-PPPOE-001',
+      password: 'clave-secreta',
+      profile: 'perfil-residencial',
+      service: 'pppoe',
+    };
+    const adapter = actionAdapter('routeros.pppoe.update');
+
+    const result = await adapter.execute(
+      updateInput({
+        comment: 'Prueba E2E PPPoE Update 001',
+        credentialReference: 'cred-cliente-pppoe-001',
+        pppoeReference: 'TEST-PPPOE-001',
+        profile: 'perfil-residencial',
+      }),
+    );
+
+    expect(result.outcome).toBe('success');
+    expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print']);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+  });
+
+  it('update: si algo difiere realmente, envia /ppp/secret/print y luego /ppp/secret/set con el .id interno', async () => {
+    harness.existingRecord = {
+      '.id': '*A1',
+      comment: 'Comentario viejo',
+      disabled: 'no',
+      name: 'TEST-PPPOE-001',
+      password: 'clave-secreta',
+      profile: 'perfil-residencial',
+      service: 'pppoe',
+    };
+    const adapter = actionAdapter('routeros.pppoe.update');
+
+    const result = await adapter.execute(
+      updateInput({ comment: 'Comentario nuevo', pppoeReference: 'TEST-PPPOE-001' }),
+    );
+
+    expect(result.outcome).toBe('success');
+    // El adapter hace su propio findPppoeSecret (chequeo de no-op) y updatePppoeSecret()
+    // resuelve el .id con otro findPppoeSecret interno antes de enviar /ppp/secret/set.
+    expect(harness.captured.map((entry) => entry.command)).toEqual([
+      '/ppp/secret/print',
+      '/ppp/secret/print',
+      '/ppp/secret/set',
+    ]);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+    expect(harness.captured[1]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+    expect(harness.captured[2]?.attributes).toEqual({
+      comment: 'Comentario nuevo',
+      numbers: '*A1',
+    });
+  });
+
+  function actionInput(actionType: string): ProvisioningActionInput {
+    return {
+      actionType,
+      companyId: 'company-1',
+      configurationReference: undefined,
+      idempotencyKey: 'key-action',
+      inputSnapshotJson: JSON.stringify({
+        actionType,
+        pppoeReference: 'TEST-PPPOE-001',
+        routerId: 'router-01',
+      }),
+      requestId: 'req-action',
+      target: { id: 'TEST-PPPOE-001', type: 'pppoe-secret' },
+    };
+  }
+
+  it('enable: busca el secreto con ?name=TEST-PPPOE-001, nunca con ?.id=TEST-PPPOE-001', async () => {
+    harness.existingRecord = {
+      '.id': '*A1',
+      comment: 'Comentario',
+      disabled: 'yes',
+      name: 'TEST-PPPOE-001',
+      password: 'clave-secreta',
+      profile: 'perfil-residencial',
+      service: 'pppoe',
+    };
+    const adapter = actionAdapter('routeros.pppoe.enable');
+
+    const result = await adapter.execute(actionInput('routeros.pppoe.enable'));
+
+    expect(result.outcome).toBe('success');
+    expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print', '/ppp/secret/enable']);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+    expect(harness.captured[1]?.attributes).toEqual({ numbers: '*A1' });
+  });
+
+  it('disable: busca el secreto con ?name=TEST-PPPOE-001, nunca con ?.id=TEST-PPPOE-001', async () => {
+    harness.existingRecord = {
+      '.id': '*A1',
+      comment: 'Comentario',
+      disabled: 'no',
+      name: 'TEST-PPPOE-001',
+      password: 'clave-secreta',
+      profile: 'perfil-residencial',
+      service: 'pppoe',
+    };
+    const adapter = actionAdapter('routeros.pppoe.disable');
+
+    const result = await adapter.execute(actionInput('routeros.pppoe.disable'));
+
+    expect(result.outcome).toBe('success');
+    expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print', '/ppp/secret/disable']);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+    expect(harness.captured[1]?.attributes).toEqual({ numbers: '*A1' });
+  });
+
+  it('remove: busca el secreto con ?name=TEST-PPPOE-001, nunca con ?.id=TEST-PPPOE-001', async () => {
+    harness.existingRecord = {
+      '.id': '*A1',
+      comment: 'Comentario',
+      disabled: 'no',
+      name: 'TEST-PPPOE-001',
+      password: 'clave-secreta',
+      profile: 'perfil-residencial',
+      service: 'pppoe',
+    };
+    const adapter = actionAdapter('routeros.pppoe.remove');
+
+    const result = await adapter.execute(actionInput('routeros.pppoe.remove'));
+
+    expect(result.outcome).toBe('success');
+    expect(harness.captured.map((entry) => entry.command)).toEqual(['/ppp/secret/print', '/ppp/secret/remove']);
+    expect(harness.captured[0]?.queries).toEqual(['?name=TEST-PPPOE-001']);
+    expect(harness.captured[1]?.attributes).toEqual({ numbers: '*A1' });
+  });
 });
