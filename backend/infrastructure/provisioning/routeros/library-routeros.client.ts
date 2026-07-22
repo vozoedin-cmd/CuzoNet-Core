@@ -260,7 +260,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 
     return {
       comment: reply.comment ?? '',
-      disabled: reply.disabled === 'true',
+      disabled: reply.disabled === 'yes' || reply.disabled === 'true',
       id: reply['.id'] ?? '',
       name: reply.name ?? '',
       password: reply.password ?? '',
