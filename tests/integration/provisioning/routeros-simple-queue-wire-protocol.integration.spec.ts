@@ -23,6 +23,7 @@ import { LibraryRouterOsClient } from '../../../backend/infrastructure/provision
 interface CapturedCommand {
   readonly attributes: Record<string, string>;
   readonly command: string;
+  readonly queries: readonly string[];
 }
 
 function encodeLength(length: number): Buffer {
@@ -95,13 +96,24 @@ class SentenceReader {
   }
 }
 
-function parseSentence(words: readonly string[]): { attributes: Record<string, string>; command: string; tag: string } {
+function attributeWords(attributes: Readonly<Record<string, string>>): string[] {
+  return Object.entries(attributes).map(([key, value]) => `=${key}=${value}`);
+}
+
+function parseSentence(
+  words: readonly string[],
+): { attributes: Record<string, string>; command: string; queries: string[]; tag: string } {
   const [command, ...rest] = words;
   const attributes: Record<string, string> = {};
+  const queries: string[] = [];
   let tag = '';
   for (const word of rest) {
     if (word.startsWith('.tag=')) {
       tag = word.slice('.tag='.length);
+      continue;
+    }
+    if (word.startsWith('?')) {
+      queries.push(word);
       continue;
     }
     if (word.startsWith('=')) {
@@ -111,23 +123,29 @@ function parseSentence(words: readonly string[]): { attributes: Record<string, s
       attributes[key] = value;
     }
   }
-  return { attributes, command: command ?? '', tag };
+  return { attributes, command: command ?? '', queries, tag };
 }
 
 describe('LibraryRouterOsClient wire protocol (Simple Queue)', () => {
   let server: Server;
   let port: number;
   let captured: CapturedCommand[];
+  /** Cuando esta seteado, /queue/simple/print responde con un !re de esta cola antes del !done. */
+  let existingQueue: Record<string, string> | undefined;
 
   beforeEach(async () => {
     captured = [];
+    existingQueue = undefined;
     server = createServer((socket: Socket) => {
       const reader = new SentenceReader();
       socket.on('data', (chunk: Buffer) => {
         for (const words of reader.push(chunk)) {
-          const { attributes, command, tag } = parseSentence(words);
+          const { attributes, command, queries, tag } = parseSentence(words);
           if (command !== '/login') {
-            captured.push({ attributes, command });
+            captured.push({ attributes, command, queries });
+          }
+          if (command === '/queue/simple/print' && existingQueue) {
+            socket.write(encodeSentence(['!re', ...attributeWords(existingQueue), `.tag=${tag}`]));
           }
           socket.write(encodeSentence(['!done', `.tag=${tag}`]));
         }
@@ -253,5 +271,189 @@ describe('LibraryRouterOsClient wire protocol (Simple Queue)', () => {
       name: 'TEST-CUZONET-008',
       target: '192.168.10.250/32',
     });
+  });
+
+  function updateAdapterAndDeps(): RouterOsSimpleQueueProvisioningAdapter {
+    const resolver: RouterConnectionResolverPort = { resolve: async () => testProfile() };
+    const secretProvider: SecretProviderPort = { getSecret: async () => 'irrelevant' };
+    const clientFactory: RouterOsClientFactoryPort = {
+      create: async (profile, secret) => LibraryRouterOsClient.connect(profile, secret),
+    };
+    return new RouterOsSimpleQueueProvisioningAdapter(
+      'routeros.simple_queue.update',
+      resolver,
+      secretProvider,
+      clientFactory,
+    );
+  }
+
+  function updateInput(payload: Record<string, unknown>): ProvisioningActionInput {
+    return {
+      actionType: 'routeros.simple_queue.update',
+      companyId: 'company-1',
+      configurationReference: undefined,
+      idempotencyKey: 'key-update',
+      inputSnapshotJson: JSON.stringify({
+        actionType: 'routeros.simple_queue.update',
+        routerId: 'router-01',
+        ...payload,
+      }),
+      requestId: 'req-update',
+      target: { id: 'TEST-CUZONET-008', type: 'simple-queue' },
+    };
+  }
+
+  it('update: si la referencia no existe, solo envia /queue/simple/print (nunca /queue/simple/set)', async () => {
+    const adapter = updateAdapterAndDeps();
+
+    const result = await adapter.execute(
+      updateInput({ comment: 'no importa', queueReference: 'TEST-CUZONET-008' }),
+    );
+
+    expect(result.outcome).toBe('permanentFailure');
+    if (result.outcome === 'permanentFailure') {
+      expect(result.errorCode).toBe('ROUTEROS_SIMPLE_QUEUE_NOT_FOUND');
+    }
+    expect(captured.map((entry) => entry.command)).toEqual(['/queue/simple/print']);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+  });
+
+  it('update: si el estado deseado ya coincide (con normalizacion), solo envia /queue/simple/print (idempotente, sin /queue/simple/set)', async () => {
+    existingQueue = {
+      '.id': '*B76',
+      comment: 'Prueba E2E CuzoNet 008',
+      disabled: 'no',
+      'max-limit': '1000000/2000000', // como lo devuelve RouterOS
+      name: 'TEST-CUZONET-008',
+      target: '192.168.10.250/32', // como lo devuelve RouterOS
+    };
+    const adapter = updateAdapterAndDeps();
+
+    const result = await adapter.execute(
+      updateInput({
+        comment: 'Prueba E2E CuzoNet 008',
+        maxLimitDownload: '2M',
+        maxLimitUpload: '1M',
+        queueReference: 'TEST-CUZONET-008',
+        target: '192.168.10.250', // sin mascara: equivalente tras normalizar
+      }),
+    );
+
+    expect(result.outcome).toBe('success');
+    expect(captured.map((entry) => entry.command)).toEqual(['/queue/simple/print']);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+  });
+
+  it('update: si algo difiere realmente, envia /queue/simple/print y luego /queue/simple/set con los atributos correctos', async () => {
+    existingQueue = {
+      '.id': '*B76',
+      comment: 'Comentario viejo',
+      disabled: 'no',
+      'max-limit': '1000000/2000000',
+      name: 'TEST-CUZONET-008',
+      target: '192.168.10.250/32',
+    };
+    const adapter = updateAdapterAndDeps();
+
+    const result = await adapter.execute(
+      updateInput({ comment: 'Comentario nuevo', queueReference: 'TEST-CUZONET-008' }),
+    );
+
+    expect(result.outcome).toBe('success');
+    // El adapter hace su propio findSimpleQueue (chequeo de no-op) y updateSimpleQueue()
+    // resuelve el .id con otro findSimpleQueue interno antes de enviar /queue/simple/set.
+    expect(captured.map((entry) => entry.command)).toEqual([
+      '/queue/simple/print',
+      '/queue/simple/print',
+      '/queue/simple/set',
+    ]);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+    expect(captured[1]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+    expect(captured[2]?.attributes).toEqual({
+      comment: 'Comentario nuevo',
+      numbers: '*B76',
+    });
+  });
+
+  function actionAdapter(actionType: string): RouterOsSimpleQueueProvisioningAdapter {
+    const resolver: RouterConnectionResolverPort = { resolve: async () => testProfile() };
+    const secretProvider: SecretProviderPort = { getSecret: async () => 'irrelevant' };
+    const clientFactory: RouterOsClientFactoryPort = {
+      create: async (profile, secret) => LibraryRouterOsClient.connect(profile, secret),
+    };
+    return new RouterOsSimpleQueueProvisioningAdapter(actionType, resolver, secretProvider, clientFactory);
+  }
+
+  function actionInput(actionType: string): ProvisioningActionInput {
+    return {
+      actionType,
+      companyId: 'company-1',
+      configurationReference: undefined,
+      idempotencyKey: 'key-action',
+      inputSnapshotJson: JSON.stringify({
+        actionType,
+        queueReference: 'TEST-CUZONET-008',
+        routerId: 'router-01',
+      }),
+      requestId: 'req-action',
+      target: { id: 'TEST-CUZONET-008', type: 'simple-queue' },
+    };
+  }
+
+  it('enable: busca la cola con ?name=TEST-CUZONET-008, nunca con ?.id=TEST-CUZONET-008', async () => {
+    existingQueue = {
+      '.id': '*B76',
+      comment: 'Comentario',
+      disabled: 'yes',
+      'max-limit': '1000000/2000000',
+      name: 'TEST-CUZONET-008',
+      target: '192.168.10.250/32',
+    };
+    const adapter = actionAdapter('routeros.simple_queue.enable');
+
+    const result = await adapter.execute(actionInput('routeros.simple_queue.enable'));
+
+    expect(result.outcome).toBe('success');
+    expect(captured.map((entry) => entry.command)).toEqual(['/queue/simple/print', '/queue/simple/enable']);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+    expect(captured[1]?.attributes).toEqual({ numbers: '*B76' });
+  });
+
+  it('disable: busca la cola con ?name=TEST-CUZONET-008, nunca con ?.id=TEST-CUZONET-008', async () => {
+    existingQueue = {
+      '.id': '*B76',
+      comment: 'Comentario',
+      disabled: 'no',
+      'max-limit': '1000000/2000000',
+      name: 'TEST-CUZONET-008',
+      target: '192.168.10.250/32',
+    };
+    const adapter = actionAdapter('routeros.simple_queue.disable');
+
+    const result = await adapter.execute(actionInput('routeros.simple_queue.disable'));
+
+    expect(result.outcome).toBe('success');
+    expect(captured.map((entry) => entry.command)).toEqual(['/queue/simple/print', '/queue/simple/disable']);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+    expect(captured[1]?.attributes).toEqual({ numbers: '*B76' });
+  });
+
+  it('remove: busca la cola con ?name=TEST-CUZONET-008, nunca con ?.id=TEST-CUZONET-008', async () => {
+    existingQueue = {
+      '.id': '*B76',
+      comment: 'Comentario',
+      disabled: 'no',
+      'max-limit': '1000000/2000000',
+      name: 'TEST-CUZONET-008',
+      target: '192.168.10.250/32',
+    };
+    const adapter = actionAdapter('routeros.simple_queue.remove');
+
+    const result = await adapter.execute(actionInput('routeros.simple_queue.remove'));
+
+    expect(result.outcome).toBe('success');
+    expect(captured.map((entry) => entry.command)).toEqual(['/queue/simple/print', '/queue/simple/remove']);
+    expect(captured[0]?.queries).toEqual(['?name=TEST-CUZONET-008']);
+    expect(captured[1]?.attributes).toEqual({ numbers: '*B76' });
   });
 });

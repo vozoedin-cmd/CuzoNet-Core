@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import type { ProvisioningActionInput } from '../../../../../backend/application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
@@ -167,6 +167,203 @@ describe('RouterOsSimpleQueueProvisioningAdapter', () => {
 
     expect(result.outcome).to.equal('success');
     expect(fakeClient.queues.length).to.equal(1);
+  });
+
+  describe('routeros.simple_queue.update', () => {
+    let updateAdapter: RouterOsSimpleQueueProvisioningAdapter;
+
+    beforeEach(() => {
+      updateAdapter = new RouterOsSimpleQueueProvisioningAdapter(
+        'routeros.simple_queue.update',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+    });
+
+    function updateInput(payload: Record<string, unknown>, requestId: string): ProvisioningActionInput {
+      return {
+        actionType: 'routeros.simple_queue.update',
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: requestId,
+        inputSnapshotJson: JSON.stringify({
+          actionType: 'routeros.simple_queue.update',
+          routerId: 'router-lab',
+          ...payload,
+        }),
+        requestId,
+        target: { id: 'TEST-CUZONET-008', type: 'simple-queue' },
+      };
+    }
+
+    it('returns ROUTEROS_SIMPLE_QUEUE_NOT_FOUND when the queue reference does not exist, and never calls updateSimpleQueue', async () => {
+      const updateSpy = vi.spyOn(fakeClient, 'updateSimpleQueue');
+
+      const result = await updateAdapter.execute(
+        updateInput({ comment: 'nuevo comentario', queueReference: 'TEST-CUZONET-008' }, 'req-update-not-found'),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_SIMPLE_QUEUE_NOT_FOUND');
+      }
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent (no /queue/simple/set) when the desired state already matches, including target/max-limit normalization', async () => {
+      fakeClient.queues.push({
+        comment: 'Prueba E2E CuzoNet 008',
+        disabled: false,
+        id: '*B76',
+        maxLimit: '1000000/2000000', // como lo devuelve RouterOS (bytes/segundo)
+        name: 'TEST-CUZONET-008',
+        target: '192.168.10.250/32', // como lo devuelve RouterOS (con mascara)
+      });
+      const updateSpy = vi.spyOn(fakeClient, 'updateSimpleQueue');
+
+      const result = await updateAdapter.execute(
+        updateInput(
+          {
+            comment: 'Prueba E2E CuzoNet 008',
+            maxLimitDownload: '2M',
+            maxLimitUpload: '1M',
+            queueReference: 'TEST-CUZONET-008',
+            target: '192.168.10.250', // sin mascara: debe considerarse equivalente
+          },
+          'req-update-noop',
+        ),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(fakeClient.queues[0]?.maxLimit).to.equal('1000000/2000000'); // sin cambios
+    });
+
+    it('calls updateSimpleQueue with only the fields that actually differ', async () => {
+      fakeClient.queues.push({
+        comment: 'Comentario viejo',
+        disabled: false,
+        id: '*B76',
+        maxLimit: '1000000/2000000',
+        name: 'TEST-CUZONET-008',
+        target: '192.168.10.250/32',
+      });
+      const updateSpy = vi.spyOn(fakeClient, 'updateSimpleQueue');
+
+      const result = await updateAdapter.execute(
+        updateInput(
+          {
+            comment: 'Comentario nuevo',
+            queueReference: 'TEST-CUZONET-008',
+          },
+          'req-update-real-change',
+        ),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledWith(
+        { name: 'TEST-CUZONET-008' },
+        { comment: 'Comentario nuevo' },
+      );
+      expect(fakeClient.queues[0]?.comment).to.equal('Comentario nuevo');
+    });
+
+    it('looks up the queue by name only, never by id, when checking existence', async () => {
+      fakeClient.queues.push({
+        comment: 'Comentario',
+        disabled: false,
+        id: '*B76',
+        maxLimit: '1000000/2000000',
+        name: 'TEST-CUZONET-008',
+        target: '192.168.10.250/32',
+      });
+      const findSpy = vi.spyOn(fakeClient, 'findSimpleQueue');
+
+      await updateAdapter.execute(
+        updateInput({ comment: 'Comentario nuevo', queueReference: 'TEST-CUZONET-008' }, 'req-update-lookup'),
+      );
+
+      expect(findSpy).toHaveBeenCalledWith({ name: 'TEST-CUZONET-008' });
+    });
+  });
+
+  describe('routeros.simple_queue.enable / disable / remove', () => {
+    beforeEach(() => {
+      fakeClient.queues.push({
+        comment: 'Comentario',
+        disabled: false,
+        id: '*B76',
+        maxLimit: '1000000/2000000',
+        name: 'TEST-CUZONET-008',
+        target: '192.168.10.250/32',
+      });
+    });
+
+    function actionInput(actionType: string, requestId: string): ProvisioningActionInput {
+      return {
+        actionType,
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: requestId,
+        inputSnapshotJson: JSON.stringify({
+          actionType,
+          queueReference: 'TEST-CUZONET-008',
+          routerId: 'router-lab',
+        }),
+        requestId,
+        target: { id: 'TEST-CUZONET-008', type: 'simple-queue' },
+      };
+    }
+
+    it('enable finds the queue by name only, never by id', async () => {
+      const enableAdapter = new RouterOsSimpleQueueProvisioningAdapter(
+        'routeros.simple_queue.enable',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const enableSpy = vi.spyOn(fakeClient, 'enableSimpleQueue');
+
+      const result = await enableAdapter.execute(actionInput('routeros.simple_queue.enable', 'req-enable'));
+
+      expect(result.outcome).to.equal('success');
+      expect(enableSpy).toHaveBeenCalledWith({ name: 'TEST-CUZONET-008' });
+      expect(fakeClient.queues[0]?.disabled).to.equal(false);
+    });
+
+    it('disable finds the queue by name only, never by id', async () => {
+      const disableAdapter = new RouterOsSimpleQueueProvisioningAdapter(
+        'routeros.simple_queue.disable',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const disableSpy = vi.spyOn(fakeClient, 'disableSimpleQueue');
+
+      const result = await disableAdapter.execute(actionInput('routeros.simple_queue.disable', 'req-disable'));
+
+      expect(result.outcome).to.equal('success');
+      expect(disableSpy).toHaveBeenCalledWith({ name: 'TEST-CUZONET-008' });
+      expect(fakeClient.queues[0]?.disabled).to.equal(true);
+    });
+
+    it('remove finds the queue by name only, never by id', async () => {
+      const removeAdapter = new RouterOsSimpleQueueProvisioningAdapter(
+        'routeros.simple_queue.remove',
+        resolver,
+        secretProvider,
+        clientFactory,
+      );
+      const removeSpy = vi.spyOn(fakeClient, 'removeSimpleQueue');
+
+      const result = await removeAdapter.execute(actionInput('routeros.simple_queue.remove', 'req-remove'));
+
+      expect(result.outcome).to.equal('success');
+      expect(removeSpy).toHaveBeenCalledWith({ name: 'TEST-CUZONET-008' });
+      expect(fakeClient.queues).to.have.length(0);
+    });
   });
 
   it('should reject invalid json payload', async () => {

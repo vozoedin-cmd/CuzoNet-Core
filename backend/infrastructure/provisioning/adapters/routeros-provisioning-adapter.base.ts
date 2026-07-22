@@ -70,6 +70,13 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
 
     const validation = this.schema.safeParse(parsedPayload);
     if (!validation.success) {
+      // TEMPORAL: diagnóstico de ROUTEROS_VALIDATION_ERROR — remover una vez confirmada la causa.
+      // Los issues de Zod solo traen path/code/message (y a veces expected/received con tipos,
+      // nunca el valor crudo del payload), por lo que es seguro registrarlos completos.
+      logger.warn(
+        { action: input.actionType, issues: validation.error.issues },
+        'routeros_validation_error_diagnostics',
+      );
       return {
         errorCode: 'ROUTEROS_VALIDATION_ERROR',
         errorMessage: 'Payload JSON no cumple el esquema requerido.',

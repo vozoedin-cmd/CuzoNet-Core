@@ -3,11 +3,13 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
+  RouterOsSimpleQueue,
   RouterOsSimpleQueueCreateData,
   RouterOsSimpleQueueUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { RouterOsSimpleQueueConflictError } from '../../../domain/provisioning/routeros/errors/routeros-simple-queue-conflict.error.js';
+import { RouterOsSimpleQueueNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-simple-queue-not-found.error.js';
 import {
   routerOsSimpleQueueInputSchema,
   type RouterOsSimpleQueueCreateInput,
@@ -59,6 +61,31 @@ function normalizeSimpleQueueMaxLimit(maxLimit: string): [number, number] {
 function simpleQueueMaxLimitsEqual(actual: string, desiredUpload: string, desiredDownload: string): boolean {
   const [actualUpload, actualDownload] = normalizeSimpleQueueMaxLimit(actual);
   return actualUpload === normalizeRouterOsRate(desiredUpload) && actualDownload === normalizeRouterOsRate(desiredDownload);
+}
+
+/**
+ * Un campo de update solo participa en la comparacion si vino en el comando (los campos
+ * de update son todos opcionales). Reutiliza la misma normalizacion de target/max-limit
+ * que Create para evitar el mismo falso conflicto (mascara CIDR, bytes/s vs tasas abreviadas).
+ */
+function simpleQueueUpdateIsNoop(existing: RouterOsSimpleQueue, command: RouterOsSimpleQueueUpdateInput): boolean {
+  if (command.queueName !== undefined && command.queueName !== existing.name) {
+    return false;
+  }
+  if (command.comment !== undefined && command.comment !== (existing.comment ?? '')) {
+    return false;
+  }
+  if (command.target !== undefined && normalizeSimpleQueueTarget(command.target) !== normalizeSimpleQueueTarget(existing.target)) {
+    return false;
+  }
+  if (
+    command.maxLimitUpload !== undefined &&
+    command.maxLimitDownload !== undefined &&
+    !simpleQueueMaxLimitsEqual(existing.maxLimit, command.maxLimitUpload, command.maxLimitDownload)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsSimpleQueueInput> {
@@ -122,6 +149,17 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     client: RouterOsClientPort,
     command: RouterOsSimpleQueueUpdateInput,
   ): Promise<string> {
+    const existing = await client.findSimpleQueue({ name: command.queueReference });
+    if (!existing) {
+      throw new RouterOsSimpleQueueNotFoundError(
+        `No existe una Simple Queue con referencia: ${command.queueReference}`,
+      );
+    }
+
+    if (simpleQueueUpdateIsNoop(existing, command)) {
+      return command.queueReference; // Idempotent success — nada que aplicar, no se envia /queue/simple/set
+    }
+
     let maxLimit: string | undefined;
     if (command.maxLimitUpload !== undefined && command.maxLimitDownload !== undefined) {
       maxLimit = `${command.maxLimitUpload}/${command.maxLimitDownload}`;
@@ -135,7 +173,7 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     };
 
     await client.updateSimpleQueue(
-      { id: command.queueReference, name: command.queueReference },
+      { name: command.queueReference },
       updateData,
     );
     return command.queueReference;
@@ -145,7 +183,7 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     client: RouterOsClientPort,
     command: RouterOsSimpleQueueEnableInput,
   ): Promise<string> {
-    await client.enableSimpleQueue({ id: command.queueReference, name: command.queueReference });
+    await client.enableSimpleQueue({ name: command.queueReference });
     return command.queueReference;
   }
 
@@ -153,7 +191,7 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     client: RouterOsClientPort,
     command: RouterOsSimpleQueueDisableInput,
   ): Promise<string> {
-    await client.disableSimpleQueue({ id: command.queueReference, name: command.queueReference });
+    await client.disableSimpleQueue({ name: command.queueReference });
     return command.queueReference;
   }
 
@@ -161,7 +199,7 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     client: RouterOsClientPort,
     command: RouterOsSimpleQueueRemoveInput,
   ): Promise<string> {
-    await client.removeSimpleQueue({ id: command.queueReference, name: command.queueReference });
+    await client.removeSimpleQueue({ name: command.queueReference });
     return command.queueReference;
   }
 
@@ -169,6 +207,13 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     if (error instanceof RouterOsSimpleQueueConflictError) {
       return {
         errorCode: 'ROUTEROS_SIMPLE_QUEUE_CONFLICT',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsSimpleQueueNotFoundError) {
+      return {
+        errorCode: 'ROUTEROS_SIMPLE_QUEUE_NOT_FOUND',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
