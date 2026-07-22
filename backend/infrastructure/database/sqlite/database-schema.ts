@@ -545,6 +545,20 @@ export interface ProvisioningAttemptTable {
   duration_ms: Nullable<number>;
   metadata_json: Nullable<string>;
 }
+export interface DesiredResourceStateTable {
+  id: string;
+  company_id: string;
+  router_id: string;
+  resource_type: string;
+  resource_reference: string;
+  desired_fields_json: string;
+  disabled: number;
+  desired_position: Nullable<number>;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: Nullable<string>;
+}
 export interface DatabaseSchema {
   alert_evaluation_states: AlertEvaluationStateTable;
   alert_rules: AlertRuleTable;
@@ -561,6 +575,7 @@ export interface DatabaseSchema {
   clients: ClientTable;
   companies: CompanyTable;
   database_metadata: DatabaseMetadataTable;
+  desired_resource_states: DesiredResourceStateTable;
   document_sequences: DocumentSequenceTable;
   event_deliveries: EventDeliveryTable;
   idempotency_keys: IdempotencyKeyTable;

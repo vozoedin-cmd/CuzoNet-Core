@@ -19,11 +19,18 @@ import { createMonitoringRouter } from './api/monitoring/monitoring.routes.js';
 import { createApp } from './api/http/app.js';
 import { ProvisioningRequestsController } from './api/provisioning/controller/provisioning-requests.controller.js';
 import { createProvisioningRequestsRouter } from './api/provisioning/routes/provisioning-requests.routes.js';
+import { DesiredResourceStateController } from './api/synchronization/controller/desired-resource-state.controller.js';
 import { SynchronizationController } from './api/synchronization/controller/synchronization.controller.js';
+import { createDesiredResourceStateRouter } from './api/synchronization/routes/desired-resource-state.routes.js';
 import { createSynchronizationRouter } from './api/synchronization/routes/synchronization.routes.js';
 import { GenerateReconciliationPlan } from './application/use-cases/synchronization/generate-reconciliation-plan.use-case.js';
-import { ProvisioningHistoryDesiredStateRepository } from './infrastructure/synchronization/provisioning-history-desired-state.repository.js';
+import { GetDesiredResourceState } from './application/use-cases/synchronization/get-desired-resource-state.use-case.js';
+import { ListDesiredResourceStates } from './application/use-cases/synchronization/list-desired-resource-states.use-case.js';
+import { RemoveDesiredResourceState } from './application/use-cases/synchronization/remove-desired-resource-state.use-case.js';
+import { SetDesiredResourceState } from './application/use-cases/synchronization/set-desired-resource-state.use-case.js';
+import { SqliteDesiredResourceStateRepository } from './infrastructure/database/synchronization/sqlite/sqlite-desired-resource-state.repository.js';
 import { RouterOsActualStateReader } from './infrastructure/synchronization/routeros-actual-state.reader.js';
+import { SqliteDesiredStateRepository } from './infrastructure/synchronization/sqlite-desired-state.repository.js';
 import { RequestProvisioning } from './application/use-cases/provisioning/request-provisioning/request-provisioning.use-case.js';
 import { DispatchProvisioningRequest } from './application/use-cases/provisioning/dispatch-provisioning-request/dispatch-provisioning-request.use-case.js';
 import { CancelProvisioningRequest } from './application/use-cases/provisioning/cancel-provisioning-request/cancel-provisioning-request.use-case.js';
@@ -863,8 +870,10 @@ const provisioningRequestsController = new ProvisioningRequestsController({
 });
 const provisioningRequestsRouter = createProvisioningRequestsRouter(provisioningRequestsController);
 
+const desiredResourceStateRepo = new SqliteDesiredResourceStateRepository(sqlite.session);
+
 const generateReconciliationPlan = new GenerateReconciliationPlan(
-  new ProvisioningHistoryDesiredStateRepository(provisioningRequestRepo),
+  new SqliteDesiredStateRepository(desiredResourceStateRepo),
   new RouterOsActualStateReader(
     new EnvironmentRouterConnectionResolver(),
     new EnvironmentSecretProvider(),
@@ -875,6 +884,14 @@ const generateReconciliationPlan = new GenerateReconciliationPlan(
 );
 const synchronizationController = new SynchronizationController(generateReconciliationPlan);
 const synchronizationRouter = createSynchronizationRouter(synchronizationController);
+
+const desiredResourceStateController = new DesiredResourceStateController({
+  getState: new GetDesiredResourceState(desiredResourceStateRepo, companyContext),
+  listStates: new ListDesiredResourceStates(desiredResourceStateRepo, companyContext),
+  removeState: new RemoveDesiredResourceState(desiredResourceStateRepo, companyContext, clock),
+  setState: new SetDesiredResourceState(desiredResourceStateRepo, companyContext, clock, idGenerator),
+});
+const desiredResourceStateRouter = createDesiredResourceStateRouter(desiredResourceStateController);
 
 const provisioningWorkerId = `provisioning-${process.pid}`;
 const provisioningWorkerHost = new WorkerHost(
@@ -1087,6 +1104,7 @@ const server = createServer(
       monitoringRouter,
       notificationsRouter,
       plansRouter,
+      desiredResourceStateRouter,
       provisioningRouter,
       provisioningRequestsRouter,
       servicesRouter,

@@ -14,11 +14,21 @@ import type {
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { RouterOsPasswordSecretNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-password-secret-not-found.error.js';
+import { environment } from '../../config/environment.js';
 import { logger } from '../../logging/logger.js';
 
 export interface RouterOsCommand {
   readonly actionType: string;
   readonly routerId: string;
+}
+
+/** TEMPORAL: extrae error.code (p. ej. ECONNREFUSED) de errores de Node sin recurrir a `any`. */
+function extractErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return undefined;
+  }
+  const code = (error as { code: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
 }
 
 /**
@@ -101,7 +111,34 @@ export abstract class RouterOsProvisioningAdapterBase<TCommand extends RouterOsC
       client = await this.createClient(profile, secret);
     } catch (e: unknown) {
       const failure = this.mapClientCreationError(e);
-      logger.warn({ ...logContext, ...this.resultLogFields(failure) }, 'routeros_provisioning_client_creation_failed');
+      const normalizedError =
+        e instanceof Error
+          ? {
+              cause: e.cause,
+              code: extractErrorCode(e),
+              message: e.message,
+              name: e.name,
+              stack: e.stack,
+            }
+          : {
+              type: typeof e,
+              value: String(e),
+            };
+      // TEMPORAL: diagnóstico de ROUTEROS_CLIENT_CREATION_FAILED — remover una vez identificada la causa. No registra la contraseña.
+      logger.error({
+        ...logContext,
+        ...this.resultLogFields(failure),
+        action: 'routeros.client.creation.failed',
+        commandTimeout: environment.ROUTEROS_COMMAND_TIMEOUT_MS,
+        connectTimeout: profile.timeoutMs,
+        error: normalizedError,
+        host: profile.host,
+        passwordPresent: Boolean(secret),
+        port: profile.port,
+        tls: profile.tls,
+        tlsVerify: environment.ROUTEROS_TLS_VERIFY,
+        usernamePresent: Boolean(profile.username),
+      });
       return failure;
     }
 

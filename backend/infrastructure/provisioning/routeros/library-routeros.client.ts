@@ -39,6 +39,19 @@ import type {
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
+import { logger } from '../../logging/logger.js';
+
+/**
+ * TEMPORAL: diagnóstico de "no such command" — remover una vez confirmado el fix.
+ * Solo registra el word de comando y las CLAVES de los atributos, nunca sus valores
+ * (algunos recursos, p. ej. PPPoE/Hotspot, llevan contraseñas en los atributos).
+ */
+function logRouterOsCommand(command: string, parameters?: Record<string, unknown>): void {
+  logger.info(
+    { command, parameterKeys: parameters ? Object.keys(parameters) : [] },
+    'routeros_command_sending',
+  );
+}
 
 export class LibraryRouterOsClient implements RouterOsClientPort {
   public constructor(
@@ -67,14 +80,16 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async createSimpleQueue(queue: RouterOsSimpleQueueCreateData): Promise<void> {
+    const attributes = {
+      comment: queue.comment ?? '',
+      disabled: queue.disabled ? 'yes' : 'no',
+      'max-limit': queue.maxLimit,
+      name: queue.name,
+      target: queue.target,
+    };
+    logRouterOsCommand('/queue/simple/add', attributes);
     await this.client.execute('/queue/simple/add', {
-      attributes: {
-        comment: queue.comment ?? '',
-        disabled: queue.disabled ? 'yes' : 'no',
-        'max-limit': queue.maxLimit,
-        name: queue.name,
-        target: queue.target,
-      },
+      attributes,
       timeoutMs: this.timeoutMs,
     });
   }
@@ -112,10 +127,10 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    const replies = await this.client.print('/queue/simple/print', {
-      attributes: {
-        '.proplist': '.id,name,target,max-limit,disabled,comment',
-      },
+    const findAttributes = { '.proplist': '.id,name,target,max-limit,disabled,comment' };
+    logRouterOsCommand('/queue/simple/print', findAttributes);
+    const replies = await this.client.print('/queue/simple', {
+      attributes: findAttributes,
       queries: [query],
       timeoutMs: this.timeoutMs,
     });
@@ -129,7 +144,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async listSimpleQueues(): Promise<RouterOsSimpleQueue[]> {
-    const replies = await this.client.print('/queue/simple/print', {
+    logRouterOsCommand('/queue/simple/print');
+    const replies = await this.client.print('/queue/simple', {
       attributes: {
         '.proplist': '.id,name,target,max-limit,disabled,comment',
       },
@@ -229,7 +245,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    const replies = await this.client.print('/ppp/secret/print', {
+    const replies = await this.client.print('/ppp/secret', {
       attributes: {
         '.proplist': '.id,name,service,profile,password,disabled,comment',
       },
@@ -336,7 +352,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    const replies = await this.client.print('/ip/hotspot/user/print', {
+    const replies = await this.client.print('/ip/hotspot/user', {
       attributes: {
         '.proplist': '.id,name,server,profile,password,disabled,comment,limit-uptime,limit-bytes-total,shared-users',
       },
@@ -449,7 +465,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       return null;
     }
 
-    const replies = await this.client.print('/ip/firewall/address-list/print', {
+    const replies = await this.client.print('/ip/firewall/address-list', {
       attributes: {
         '.proplist': '.id,list,address,disabled,comment,timeout',
       },
@@ -466,7 +482,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
-    const replies = await this.client.print('/ip/firewall/address-list/print', {
+    const replies = await this.client.print('/ip/firewall/address-list', {
       attributes: {
         '.proplist': '.id,list,address,disabled,comment,timeout',
       },
@@ -554,7 +570,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     }
 
     if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/filter/print', {
+      const replies = await this.client.print('/ip/firewall/filter', {
         attributes: { '.proplist': FILTER_RULE_PROPLIST },
         queries: [`?.id=${reference.id}`],
         timeoutMs: this.timeoutMs,
@@ -568,7 +584,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async listFilterRules(): Promise<RouterOsFilterRule[]> {
-    const replies = await this.client.print('/ip/firewall/filter/print', {
+    const replies = await this.client.print('/ip/firewall/filter', {
       attributes: { '.proplist': FILTER_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
@@ -684,7 +700,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     }
 
     if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/nat/print', {
+      const replies = await this.client.print('/ip/firewall/nat', {
         attributes: { '.proplist': NAT_RULE_PROPLIST },
         queries: [`?.id=${reference.id}`],
         timeoutMs: this.timeoutMs,
@@ -698,7 +714,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async listNatRules(): Promise<RouterOsNatRule[]> {
-    const replies = await this.client.print('/ip/firewall/nat/print', {
+    const replies = await this.client.print('/ip/firewall/nat', {
       attributes: { '.proplist': NAT_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
@@ -815,7 +831,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     }
 
     if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/mangle/print', {
+      const replies = await this.client.print('/ip/firewall/mangle', {
         attributes: { '.proplist': MANGLE_RULE_PROPLIST },
         queries: [`?.id=${reference.id}`],
         timeoutMs: this.timeoutMs,
@@ -829,7 +845,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async listMangleRules(): Promise<RouterOsMangleRule[]> {
-    const replies = await this.client.print('/ip/firewall/mangle/print', {
+    const replies = await this.client.print('/ip/firewall/mangle', {
       attributes: { '.proplist': MANGLE_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
@@ -905,7 +921,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 function mapReplyToSimpleQueue(reply: RouterOSRecord): RouterOsSimpleQueue {
   return {
     comment: reply.comment ?? '',
-    disabled: reply.disabled === 'true',
+    disabled: reply.disabled === 'yes' || reply.disabled === 'true',
     id: reply['.id'] ?? '',
     maxLimit: reply['max-limit'] ?? '',
     name: reply.name ?? '',

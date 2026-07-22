@@ -11,6 +11,7 @@
     "db:migrate": "tsx backend/infrastructure/database/sqlite/cli/migrate.ts",
     "db:check": "tsx backend/infrastructure/database/sqlite/cli/check.ts",
     "db:backup": "tsx backend/infrastructure/database/sqlite/cli/backup.ts",
+    "backfill:desired-state": "tsx backend/infrastructure/synchronization/cli/backfill-desired-state.ts",
     "test": "vitest run --configLoader runner",
     "test:watch": "vitest --configLoader runner",
     "typecheck": "tsc --noEmit --project tsconfig.json",

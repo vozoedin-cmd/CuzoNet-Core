@@ -18,6 +18,7 @@ export interface AppDependencies {
   plansRouter?: Router;
   provisioningRouter?: Router;
   provisioningRequestsRouter?: Router;
+  desiredResourceStateRouter?: Router;
   servicesRouter?: Router;
   synchronizationRouter?: Router;
 }
@@ -78,6 +79,9 @@ export function createApp(dependencies: AppDependencies = {}, config: AppConfig 
   }
   if (dependencies.synchronizationRouter !== undefined) {
     apiRouter.use(dependencies.synchronizationRouter);
+  }
+  if (dependencies.desiredResourceStateRouter !== undefined) {
+    apiRouter.use(dependencies.desiredResourceStateRouter);
   }
   app.use(apiPrefix, apiRouter);
   app.use(notFoundMiddleware);
