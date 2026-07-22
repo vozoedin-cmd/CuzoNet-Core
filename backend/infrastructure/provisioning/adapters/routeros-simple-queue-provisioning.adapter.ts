@@ -8,7 +8,6 @@ import type {
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { RouterOsSimpleQueueConflictError } from '../../../domain/provisioning/routeros/errors/routeros-simple-queue-conflict.error.js';
-import { logger } from '../../logging/logger.js';
 import {
   routerOsSimpleQueueInputSchema,
   type RouterOsSimpleQueueCreateInput,
@@ -19,14 +18,6 @@ import {
   type RouterOsSimpleQueueUpdateInput,
 } from '../routeros/routeros-simple-queue.input.js';
 import { RouterOsProvisioningAdapterBase } from './routeros-provisioning-adapter.base.js';
-
-interface SimpleQueueComparisonFields {
-  readonly comment: string;
-  readonly disabled: boolean;
-  readonly maxLimit: string;
-  readonly name: string;
-  readonly target: string;
-}
 
 /**
  * RouterOS siempre devuelve el target de una Simple Queue con mascara CIDR explicita
@@ -70,22 +61,6 @@ function simpleQueueMaxLimitsEqual(actual: string, desiredUpload: string, desire
   return actualUpload === normalizeRouterOsRate(desiredUpload) && actualDownload === normalizeRouterOsRate(desiredDownload);
 }
 
-/**
- * TEMPORAL: diagnóstico de ROUTEROS_SIMPLE_QUEUE_CONFLICT — remover una vez identificado
- * si el conflicto es real o un falso positivo por diferencias de representación
- * (espacios, "yes"/"no" vs boolean, formato de target, etc). Simple Queue no maneja
- * credenciales, así que es seguro registrar los valores completos (no solo las claves).
- */
-function logSimpleQueueConflict(desired: SimpleQueueComparisonFields, actual: SimpleQueueComparisonFields): void {
-  const differences = (Object.keys(desired) as Array<keyof SimpleQueueComparisonFields>).filter(
-    (field) => String(desired[field]) !== String(actual[field]),
-  );
-  logger.warn(
-    { actual, desired, differences },
-    'routeros_simple_queue_conflict_diagnostics',
-  );
-}
-
 export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioningAdapterBase<RouterOsSimpleQueueInput> {
   protected readonly referenceMetadataKey = 'queueReference';
 
@@ -121,20 +96,6 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
     command: RouterOsSimpleQueueCreateInput,
   ): Promise<string> {
     const existing = await client.findSimpleQueue({ name: command.queueName });
-    // TEMPORAL: diagnóstico incondicional de la comparación de idempotencia — remover una vez identificada la causa del conflicto.
-    logger.warn(
-      {
-        command,
-        computed: {
-          expectedMaxLimit: `${command.maxLimitUpload}/${command.maxLimitDownload}`,
-          expectedTarget: command.target,
-          maxLimitEqual: existing?.maxLimit === `${command.maxLimitUpload}/${command.maxLimitDownload}`,
-          targetEqual: existing?.target === command.target,
-        },
-        existing,
-      },
-      'routeros_simple_queue_idempotency_check',
-    );
     if (existing) {
       if (
         simpleQueueMaxLimitsEqual(existing.maxLimit, command.maxLimitUpload, command.maxLimitDownload) &&
@@ -142,22 +103,6 @@ export class RouterOsSimpleQueueProvisioningAdapter extends RouterOsProvisioning
       ) {
         return command.queueName; // Idempotent success
       }
-      logSimpleQueueConflict(
-        {
-          comment: command.comment ?? '',
-          disabled: command.disabled ?? false,
-          maxLimit: `${command.maxLimitUpload}/${command.maxLimitDownload}`,
-          name: command.queueName,
-          target: command.target,
-        },
-        {
-          comment: existing.comment ?? '',
-          disabled: existing.disabled,
-          maxLimit: existing.maxLimit,
-          name: existing.name,
-          target: existing.target,
-        },
-      );
       throw new RouterOsSimpleQueueConflictError(
         'Conflicto: ya existe una cola con diferente configuracion.',
       );
