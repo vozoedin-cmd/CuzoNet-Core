@@ -22,6 +22,7 @@ function input(actionType: string, payload: Record<string, unknown>, requestId =
 
 const secretsByReference: Record<string, string> = {
   SECRET: 'router-secret',
+  'cred-newpass456': 'newpass456',
   'cred-oldpass': 'oldpass',
   'cred-pass123': 'pass123',
 };
@@ -107,6 +108,46 @@ describe('RouterOsHotspotProvisioningAdapter', () => {
       if (result.outcome === 'permanentFailure') {
         expect(result.errorCode).to.equal('ROUTEROS_HOTSPOT_CONFLICT');
       }
+    });
+
+    it('returns a conflict (not idempotent success) when an existing user has the same profile but a different password', async () => {
+      await fakeClient.createHotspotUser({ name: 'cliente-1', password: 'pass123', profile: 'default' });
+      const adapter = adapterFor('routeros.hotspot.user.create');
+
+      const result = await adapter.execute(
+        input('routeros.hotspot.user.create', {
+          credentialReference: 'cred-newpass456',
+          name: 'cliente-1',
+          profile: 'default',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_HOTSPOT_CONFLICT');
+      }
+      // Create nunca actualiza el password en silencio: el existente en RouterOS no cambia.
+      expect(fakeClient.hotspotUsers).to.have.length(1);
+      expect(fakeClient.hotspotUsers[0]?.password).to.equal('pass123');
+    });
+
+    it('never exposes either password (existing or requested) in the conflict result', async () => {
+      await fakeClient.createHotspotUser({ name: 'cliente-1', password: 'pass123', profile: 'default' });
+      const adapter = adapterFor('routeros.hotspot.user.create');
+
+      const result = await adapter.execute(
+        input('routeros.hotspot.user.create', {
+          credentialReference: 'cred-newpass456',
+          name: 'cliente-1',
+          profile: 'default',
+          routerId: 'router-1',
+        }),
+      );
+
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.to.include('pass123');
+      expect(serialized).not.to.include('newpass456');
     });
 
     it('fails permanently when the credential reference cannot be resolved', async () => {

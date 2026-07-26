@@ -53,6 +53,15 @@ function logRouterOsCommand(command: string, parameters?: Record<string, unknown
   );
 }
 
+/**
+ * RouterOS API binaria representa los booleanos como "yes"/"no" — nunca como "true"/"false"
+ * (esa forma es exclusiva de la REST API). Un campo ausente o cualquier valor no afirmativo
+ * se interpreta como `false`, preservando el comportamiento previo del proyecto.
+ */
+function parseRouterOsBoolean(value: string | undefined): boolean {
+  return value === 'yes' || value === 'true';
+}
+
 export class LibraryRouterOsClient implements RouterOsClientPort {
   public constructor(
     private readonly client: BaseRouterOsClient,
@@ -370,7 +379,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 
     return {
       comment: reply.comment ?? '',
-      disabled: reply.disabled === 'true',
+      disabled: parseRouterOsBoolean(reply.disabled),
       id: reply['.id'] ?? '',
       ...(limitBytesTotal !== undefined ? { limitBytesTotal } : {}),
       ...(reply['limit-uptime'] ? { limitUptime: reply['limit-uptime'] as string } : {}),

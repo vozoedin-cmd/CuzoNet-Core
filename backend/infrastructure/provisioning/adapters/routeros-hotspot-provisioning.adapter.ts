@@ -81,7 +81,7 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
 
     const existing = await client.findHotspotUser({ name: name.value });
     if (existing) {
-      if (this.isEquivalent(existing, { comment, disabled, limitBytesTotal, limitUptime, profile, server, sharedUsers })) {
+      if (this.isEquivalent(existing, { comment, disabled, limitBytesTotal, limitUptime, password, profile, server, sharedUsers })) {
         return name.value; // Idempotent success
       }
       throw new RouterOsHotspotConflictError(
@@ -199,12 +199,14 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
       disabled: boolean;
       limitBytesTotal: HotspotLimitBytes | undefined;
       limitUptime: HotspotLimitUptime | undefined;
+      password: HotspotPassword;
       profile: HotspotProfileName;
       server: HotspotServerName | undefined;
       sharedUsers: HotspotSharedUsers | undefined;
     },
   ): boolean {
     return (
+      existing.password === expected.password.value &&
       existing.profile === expected.profile.value &&
       existing.disabled === expected.disabled &&
       (existing.server ?? '') === (expected.server?.value ?? '') &&
