@@ -468,6 +468,115 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
     });
   });
 
+  /**
+   * `list`+`address` no es unica en un router real. RouterOS 7.21.4 rechaza `/add`
+   * duplicados, asi que el estado llega por import/restore o por una version anterior; el
+   * router de laboratorio tiene un caso real (dos entradas MOROSOS/192.168.13.254). Se
+   * insertan directamente en el doble porque `createAddressListEntry` ya replica el
+   * rechazo del router.
+   */
+  describe('ambiguous natural key', () => {
+    const DUPLICATE = {
+      address: '192.168.13.254',
+      disabled: true,
+      dynamic: false,
+      list: 'MOROSOS',
+    };
+
+    beforeEach(() => {
+      fakeClient.addressListEntries.push(
+        { ...DUPLICATE, comment: 'X/18/2023 20:55 Cesar Xol', id: '*2' },
+        { ...DUPLICATE, comment: '2023-11-14 16:22:01', id: '*6' },
+      );
+    });
+
+    const OPERATIONS = [
+      ['add', 'createAddressListEntry'],
+      ['update', 'updateAddressListEntry'],
+      ['enable', 'enableAddressListEntry'],
+      ['disable', 'disableAddressListEntry'],
+      ['remove', 'removeAddressListEntry'],
+    ] as const;
+
+    it.each(OPERATIONS)('refuses %s and never writes to the router', async (operation, clientMethod) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.address-list.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { address: DUPLICATE.address, list: DUPLICATE.list, routerId: 'router-1' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_ADDRESS_LIST_AMBIGUOUS');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      // Ninguna de las dos entradas se toca: borrar una y dejar la otra activa seria peor
+      // que fallar, porque el firewall seguiria bloqueando y el reporte diria "hecho".
+      expect(fakeClient.addressListEntries).to.have.length(2);
+    });
+
+    it('names both conflicting ids so the operator can resolve it on the router', async () => {
+      const result = await adapterFor('routeros.firewall.address-list.remove').execute(
+        input('routeros.firewall.address-list.remove', {
+          address: DUPLICATE.address,
+          list: DUPLICATE.list,
+          routerId: 'router-1',
+        }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain('MOROSOS:192.168.13.254');
+        expect(result.errorMessage).to.contain('*2');
+        expect(result.errorMessage).to.contain('*6');
+      }
+    });
+
+    it('leaves a unique entry in another list unaffected', async () => {
+      await fakeClient.createAddressListEntry({ address: DUPLICATE.address, list: 'trusted-ips' });
+
+      const result = await adapterFor('routeros.firewall.address-list.remove').execute(
+        input('routeros.firewall.address-list.remove', {
+          address: DUPLICATE.address,
+          list: 'trusted-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.addressListEntries).to.have.length(2);
+    });
+  });
+
+  describe('single lookup per operation', () => {
+    // El adapter resuelve la entrada una vez y pasa el `.id`; el cliente ya no vuelve a
+    // buscarla. Antes cada mutacion costaba dos viajes al router.
+    const MUTATIONS = [
+      ['update', { comment: 'nuevo' }],
+      ['enable', {}],
+      ['disable', {}],
+      ['remove', {}],
+    ] as const;
+
+    it.each(MUTATIONS)('resolves the entry exactly once for %s', async (operation, extra) => {
+      await fakeClient.createAddressListEntry({
+        address: '192.168.1.10',
+        comment: 'previo',
+        disabled: operation === 'enable',
+        list: 'blocked-ips',
+      });
+      const findSpy = vi.spyOn(fakeClient, 'findAddressListEntries');
+      const actionType = `routeros.firewall.address-list.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { address: '192.168.1.10', list: 'blocked-ips', routerId: 'router-1', ...extra }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(findSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('rejects an invalid JSON payload', async () => {
     const adapter = adapterFor('routeros.firewall.address-list.add');
     const badInput: ProvisioningActionInput = {

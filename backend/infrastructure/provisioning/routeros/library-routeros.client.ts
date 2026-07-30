@@ -509,21 +509,21 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
-    const entry = await this.findAddressListEntry(reference);
-    if (!entry) return;
+    const id = await this.resolveAddressListEntryId(reference);
+    if (id === null) return;
 
     await this.client.execute('/ip/firewall/address-list/disable', {
-      attributes: { numbers: entry.id },
+      attributes: { numbers: id },
       timeoutMs: this.timeoutMs,
     });
   }
 
   public async enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
-    const entry = await this.findAddressListEntry(reference);
-    if (!entry) return;
+    const id = await this.resolveAddressListEntryId(reference);
+    if (id === null) return;
 
     await this.client.execute('/ip/firewall/address-list/enable', {
-      attributes: { numbers: entry.id },
+      attributes: { numbers: id },
       timeoutMs: this.timeoutMs,
     });
   }
@@ -531,13 +531,31 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   public async findAddressListEntry(
     reference: RouterOsAddressListEntryReference,
   ): Promise<RouterOsAddressListEntry | null> {
-    let queries: string[];
+    const entries = await this.findAddressListEntries(reference);
+    return entries[0] ?? null;
+  }
+
+  /**
+   * Resuelve el `.id` sobre el que ejecutar una mutación. Cuando quien llama ya trae el
+   * `.id` —el caso normal, porque el adapter resuelve la entrada antes de decidir qué
+   * hacer— se usa directamente y se evita un segundo viaje al router.
+   */
+  private async resolveAddressListEntryId(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<string | null> {
     if (reference.id !== undefined) {
-      queries = [`?.id=${reference.id}`];
-    } else if (reference.list !== undefined && reference.address !== undefined) {
-      queries = [`?list=${reference.list}`, `?address=${reference.address}`];
-    } else {
-      return null;
+      return reference.id;
+    }
+    const entry = await this.findAddressListEntry(reference);
+    return entry?.id ?? null;
+  }
+
+  public async findAddressListEntries(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<RouterOsAddressListEntry[]> {
+    const queries = addressListQueries(reference);
+    if (queries === null) {
+      return [];
     }
 
     const replies = await this.client.print('/ip/firewall/address-list', {
@@ -546,12 +564,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       timeoutMs: this.timeoutMs,
     });
 
-    const reply = replies[0];
-    if (!reply) {
-      return null;
-    }
-
-    return mapReplyToAddressListEntry(reply);
+    return replies.map(mapReplyToAddressListEntry);
   }
 
   public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
@@ -563,11 +576,11 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
-    const entry = await this.findAddressListEntry(reference);
-    if (!entry) return;
+    const id = await this.resolveAddressListEntryId(reference);
+    if (id === null) return;
 
     await this.client.execute('/ip/firewall/address-list/remove', {
-      attributes: { numbers: entry.id },
+      attributes: { numbers: id },
       timeoutMs: this.timeoutMs,
     });
   }
@@ -576,10 +589,10 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     reference: RouterOsAddressListEntryReference,
     data: RouterOsAddressListEntryUpdateData,
   ): Promise<void> {
-    const entry = await this.findAddressListEntry(reference);
-    if (!entry) return;
+    const id = await this.resolveAddressListEntryId(reference);
+    if (id === null) return;
 
-    const attributes: Record<string, string> = { numbers: entry.id };
+    const attributes: Record<string, string> = { numbers: id };
     if (data.comment !== undefined) attributes.comment = data.comment;
     if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
 
@@ -1069,6 +1082,21 @@ function mapReplyToHotspotUserProfile(reply: RouterOSRecord): RouterOsHotspotUse
  * y confirmados en RouterOS 7.21.4; excluye `timeout`, que no forma parte del contrato.
  */
 const ADDRESS_LIST_PROPLIST = '.id,list,address,disabled,comment,creation-time,dynamic';
+
+/**
+ * Consultas para localizar entradas de address-list, o `null` si la referencia no permite
+ * localizar nada. RouterOS combina varios `?` con AND (verificado: `?list=NO-EXISTE` junto
+ * a `?address=<existente>` devuelve cero filas).
+ */
+function addressListQueries(reference: RouterOsAddressListEntryReference): string[] | null {
+  if (reference.id !== undefined) {
+    return [`?.id=${reference.id}`];
+  }
+  if (reference.list !== undefined && reference.address !== undefined) {
+    return [`?list=${reference.list}`, `?address=${reference.address}`];
+  }
+  return null;
+}
 
 /**
  * RouterOS omite por completo las claves sin valor: una entrada sin comentario no llega

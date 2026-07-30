@@ -9,6 +9,7 @@ import type {
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { InvalidProvisioningDataError } from '../../../domain/provisioning/errors/invalid-provisioning-data.error.js';
+import { RouterOsAddressListAmbiguousError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-ambiguous.error.js';
 import { RouterOsAddressListConflictError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-conflict.error.js';
 import { RouterOsAddressListDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-dynamic.error.js';
 import { RouterOsAddressListNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-not-found.error.js';
@@ -71,7 +72,7 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     const comment = command.comment === undefined ? undefined : AddressComment.create(command.comment);
     const disabled = DisabledState.create(command.disabled ?? false);
 
-    const existing = await client.findAddressListEntry({ address: address.value, list: list.value });
+    const existing = await this.resolveSingle(client, list.value, address.value);
     if (existing) {
       // Una entrada dinamica ocupa la clave natural pero no es administrable: no puede
       // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
@@ -101,7 +102,7 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     const list = AddressListName.create(command.list);
     const address = IpAddress.create(command.address);
 
-    const existing = await client.findAddressListEntry({ address: address.value, list: list.value });
+    const existing = await this.resolveSingle(client, list.value, address.value);
     if (!existing) {
       throw new RouterOsAddressListNotFoundError(
         `Entrada no encontrada en la lista ${list.value}: ${address.value}`,
@@ -156,13 +157,38 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     client: RouterOsClientPort,
     command: RouterOsAddressListRemoveInput,
   ): Promise<string> {
-    const existing = await client.findAddressListEntry({ address: command.address, list: command.list });
+    const existing = await this.resolveSingle(client, command.list, command.address);
     if (!existing) {
       return command.address; // Idempotent success: already gone
     }
     this.assertNotDynamic(existing);
     await client.removeAddressListEntry({ id: existing.id });
     return command.address;
+  }
+
+  /**
+   * Resuelve la clave natural `list`+`address` exigiendo como maximo una coincidencia.
+   *
+   * RouterOS 7.21.4 rechaza `/add` duplicados, asi que este no es un estado que CuzoNet
+   * pueda producir; llega por configuracion importada o creada con una version anterior, y
+   * el router de laboratorio tiene un caso real. Quedarse con la primera coincidencia
+   * significaria, por ejemplo, eliminar una entrada, informar exito y dejar la otra activa
+   * en el firewall: para una lista de morosos, exactamente lo contrario de lo pedido.
+   */
+  private async resolveSingle(
+    client: RouterOsClientPort,
+    list: string,
+    address: string,
+  ): Promise<RouterOsAddressListEntry | null> {
+    const matches = await client.findAddressListEntries({ address, list });
+    if (matches.length > 1) {
+      throw new RouterOsAddressListAmbiguousError(
+        `La clave ${list}:${address} resuelve a ${matches.length} entradas en el router ` +
+          `(${matches.map((entry) => entry.id).join(', ')}). No se opera sobre una eleccion ` +
+          'arbitraria: resuelva el duplicado en el router antes de reintentar.',
+      );
+    }
+    return matches[0] ?? null;
   }
 
   /**
@@ -191,7 +217,7 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     list: string,
     address: string,
   ): Promise<RouterOsAddressListEntry> {
-    const existing = await client.findAddressListEntry({ address, list });
+    const existing = await this.resolveSingle(client, list, address);
     if (!existing) {
       throw new RouterOsAddressListNotFoundError(`Entrada no encontrada en la lista ${list}: ${address}`);
     }
@@ -244,6 +270,13 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     if (error instanceof RouterOsAddressListNotFoundError) {
       return {
         errorCode: 'ROUTEROS_ADDRESS_LIST_NOT_FOUND',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsAddressListAmbiguousError) {
+      return {
+        errorCode: 'ROUTEROS_ADDRESS_LIST_AMBIGUOUS',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };

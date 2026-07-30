@@ -125,6 +125,42 @@ describe('LibraryRouterOsClient wire protocol (Firewall Address List)', () => {
       expect(remove?.attributes).toEqual({ numbers: '*1' });
     });
 
+    /**
+     * Cuando el `.id` ya viene resuelto —el caso normal, porque el adapter localiza la
+     * entrada antes de decidir qué hacer— la mutación no vuelve a consultar al router.
+     * Antes cada una costaba dos viajes.
+     */
+    it('mutating by id sends exactly one command, with no lookup round trip', async () => {
+      harness.existingRecord = existingStatic;
+
+      await withClient(async (client) => {
+        await client.updateAddressListEntry({ id: '*1' }, { comment: 'x' });
+        await client.enableAddressListEntry({ id: '*1' });
+        await client.disableAddressListEntry({ id: '*1' });
+        await client.removeAddressListEntry({ id: '*1' });
+      });
+
+      expect(harness.captured.map((entry) => entry.command)).toEqual([
+        '/ip/firewall/address-list/set',
+        '/ip/firewall/address-list/enable',
+        '/ip/firewall/address-list/disable',
+        '/ip/firewall/address-list/remove',
+      ]);
+    });
+
+    it('still resolves by list+address when no id is given', async () => {
+      harness.existingRecord = existingStatic;
+
+      await withClient((client) =>
+        client.enableAddressListEntry({ address: '192.168.10.255', list: 'MOROSOS' }),
+      );
+
+      expect(harness.captured.map((entry) => entry.command)).toEqual([
+        '/ip/firewall/address-list/print',
+        '/ip/firewall/address-list/enable',
+      ]);
+    });
+
     it('never emits a duplicated /print/print for any address-list operation', async () => {
       harness.existingRecord = existingStatic;
 
@@ -210,6 +246,31 @@ describe('LibraryRouterOsClient wire protocol (Firewall Address List)', () => {
 
       expect(entry?.disabled).toBe(true);
       expect(entry?.dynamic).toBe(true);
+    });
+
+    /**
+     * El arnés responde con un único `!re`, así que aquí se comprueba el contrato de la
+     * forma plural: `findAddressListEntries` devuelve una colección y `findAddressListEntry`
+     * se queda con la primera. La cobertura del duplicado real (dos filas) vive en el spec
+     * del adapter, que es quien debe negarse a operar.
+     */
+    it('findAddressListEntries returns a collection, findAddressListEntry the first match', async () => {
+      harness.existingRecord = existingStatic;
+
+      const { many, one } = await withClient(async (client) => ({
+        many: await client.findAddressListEntries({ address: '192.168.10.255', list: 'MOROSOS' }),
+        one: await client.findAddressListEntry({ address: '192.168.10.255', list: 'MOROSOS' }),
+      }));
+
+      expect(many).toHaveLength(1);
+      expect(many[0]).toEqual(one);
+    });
+
+    it('findAddressListEntries returns an empty array for an unusable reference', async () => {
+      const entries = await withClient((client) => client.findAddressListEntries({ list: 'MOROSOS' }));
+
+      expect(entries).toEqual([]);
+      expect(harness.captured).toHaveLength(0);
     });
 
     it('treats an absent boolean as false', async () => {

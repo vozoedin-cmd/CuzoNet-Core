@@ -469,7 +469,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const entry = await this.findAddressListEntry(reference);
+    const entry = await this.resolveAddressListEntry(reference);
     if (!entry) {
       return;
     }
@@ -484,7 +484,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const entry = await this.findAddressListEntry(reference);
+    const entry = await this.resolveAddressListEntry(reference);
     if (!entry) {
       return;
     }
@@ -495,19 +495,40 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public async findAddressListEntry(
     reference: RouterOsAddressListEntryReference,
   ): Promise<RouterOsAddressListEntry | null> {
+    const entries = await this.findAddressListEntries(reference);
+    return entries[0] ?? null;
+  }
+
+  /**
+   * Espeja al cliente real: cuando el `.id` ya viene resuelto no hay consulta al router,
+   * asi que las pruebas que cuentan viajes miden lo mismo en ambos clientes.
+   */
+  private async resolveAddressListEntry(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<RouterOsAddressListEntry | undefined> {
+    if (reference.id !== undefined) {
+      return this.addressListEntries.find((e) => e.id === reference.id);
+    }
+    return (await this.findAddressListEntries(reference))[0];
+  }
+
+  public async findAddressListEntries(
+    reference: RouterOsAddressListEntryReference,
+  ): Promise<RouterOsAddressListEntry[]> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const entry = this.addressListEntries.find(
-      (e) =>
-        (reference.id !== undefined && e.id === reference.id) ||
-        (reference.id === undefined &&
-          reference.list !== undefined &&
-          reference.address !== undefined &&
-          e.list === reference.list &&
-          e.address === reference.address),
+    // El `.id` gana sobre `list`+`address`, igual que en el cliente real, donde RouterOS
+    // recibe `?.id=` en lugar del par. Los `?` múltiples se combinan con AND.
+    if (reference.id !== undefined) {
+      return this.addressListEntries.filter((e) => e.id === reference.id);
+    }
+    if (reference.list === undefined || reference.address === undefined) {
+      return [];
+    }
+    return this.addressListEntries.filter(
+      (e) => e.list === reference.list && e.address === reference.address,
     );
-    return entry ?? null;
   }
 
   public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
@@ -521,7 +542,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const entry = await this.findAddressListEntry(reference);
+    const entry = await this.resolveAddressListEntry(reference);
     if (!entry) {
       return;
     }
@@ -535,7 +556,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const entry = await this.findAddressListEntry(reference);
+    const entry = await this.resolveAddressListEntry(reference);
     if (!entry) {
       return;
     }

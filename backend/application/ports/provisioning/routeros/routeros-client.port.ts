@@ -484,6 +484,15 @@ export interface RouterOsClientPort {
   disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
   enableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
   findAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<RouterOsAddressListEntry | null>;
+  /**
+   * Todas las entradas que coinciden con la referencia. `list`+`address` no garantiza
+   * unicidad en un router real: aunque RouterOS 7.21.4 rechaza `/add` duplicados
+   * (`already have such entry`), una configuración importada o creada por una versión
+   * anterior sí puede contener duplicados — el router de laboratorio tiene uno. Quien
+   * necesite operar sobre una entrada debe usar esto y exigir exactamente una coincidencia,
+   * en vez de quedarse en silencio con la primera.
+   */
+  findAddressListEntries(reference: RouterOsAddressListEntryReference): Promise<RouterOsAddressListEntry[]>;
   /** Full listing of all address-list entries, used by the Synchronization Engine to detect entries CuzoNet never provisioned. */
   listAddressListEntries(): Promise<RouterOsAddressListEntry[]>;
   removeAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
