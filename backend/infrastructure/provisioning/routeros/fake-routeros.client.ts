@@ -710,6 +710,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(r.logPrefix !== undefined ? { logPrefix: r.logPrefix } : {}),
       ...(r.addressList !== undefined ? { addressList: r.addressList } : {}),
       ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+      // srcAddress/dstAddress se almacenaban al crear pero no se leían de vuelta, así que
+      // el doble los perdía mientras LibraryRouterOsClient sí los devuelve. Lo detectaron
+      // los contract tests entre ambos clientes.
+      ...(r.srcAddress !== undefined ? { srcAddress: r.srcAddress } : {}),
+      ...(r.dstAddress !== undefined ? { dstAddress: r.dstAddress } : {}),
       ...(r.srcPort !== undefined ? { srcPort: r.srcPort } : {}),
       ...(r.dstPort !== undefined ? { dstPort: r.dstPort } : {}),
       ...(r.inInterface !== undefined ? { inInterface: r.inInterface } : {}),

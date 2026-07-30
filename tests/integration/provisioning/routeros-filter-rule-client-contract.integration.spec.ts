@@ -71,14 +71,10 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
     'src-address': '192.168.1.0/24',
   };
 
-  /**
-   * El doble asigna ids propios, asi que la identidad no forma parte del contrato
-   * comparado. `srcAddress`/`dstAddress` tampoco, por la divergencia que se fija abajo:
-   * el doble los guarda pero no los expone en ObservedFilterRule.
-   */
+  /** El doble asigna ids propios; la identidad no forma parte del contrato comparado. */
   function comparableShape(rule: ObservedFilterRule | null): unknown {
     if (rule === null) return null;
-    const { dstAddress: _dst, id: _id, srcAddress: _src, ...rest } = rule;
+    const { id: _id, ...rest } = rule;
     return rest;
   }
 
@@ -121,18 +117,31 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
       expect(fromFake.map((rule) => rule.physicalIndex)).toEqual([0, 1]);
     });
 
-    it('GAP: the double never exposes srcAddress or dstAddress, though it stores them', async () => {
+    /** Regresion: el doble almacenaba srcAddress/dstAddress pero no los devolvia. */
+    it('both expose srcAddress and dstAddress when the rule carries them', async () => {
       harness.existingRecords = [{ ...ROUTER_REPLY, 'dst-address': '10.0.0.0/8' }];
       await fake.createFilterRule({ ...SPEC, dstAddress: '10.0.0.0/8' });
 
       const fromLibrary = (await viaLibrary((client) => client.listFilterRules()))[0];
       const fromFake = (await fake.listFilterRules())[0];
 
-      // El cliente real si los devuelve.
-      expect(fromLibrary).toMatchObject({ dstAddress: '10.0.0.0/8', srcAddress: '192.168.1.0/24' });
-      // El doble los acepta al crear pero mapFakeToObservedFilterRule no los lee de vuelta.
-      expect(fromFake).not.toHaveProperty('srcAddress');
-      expect(fromFake).not.toHaveProperty('dstAddress');
+      const expected = { dstAddress: '10.0.0.0/8', srcAddress: '192.168.1.0/24' };
+      expect(fromLibrary).toMatchObject(expected);
+      expect(fromFake).toMatchObject(expected);
+    });
+
+    it('both omit srcAddress and dstAddress when the rule has neither', async () => {
+      const bare = { action: 'accept', chain: 'forward', comment: 'cuzonet:firewall-filter:bare' };
+      harness.existingRecords = [{ '.id': '*1', ...bare }];
+      await fake.createFilterRule(bare);
+
+      const fromLibrary = (await viaLibrary((client) => client.listFilterRules()))[0];
+      const fromFake = (await fake.listFilterRules())[0];
+
+      for (const rule of [fromLibrary, fromFake]) {
+        expect(rule).not.toHaveProperty('srcAddress');
+        expect(rule).not.toHaveProperty('dstAddress');
+      }
     });
 
     it('both omit the same optional properties for a bare rule', async () => {

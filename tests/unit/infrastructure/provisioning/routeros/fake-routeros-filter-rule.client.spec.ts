@@ -26,6 +26,60 @@ describe('FakeRouterOsClient filter rules', () => {
     expect(client.filterRules[0]?.id).to.match(/^\*\d+$/);
   });
 
+  /**
+   * Regresion: srcAddress y dstAddress se almacenaban al crear pero
+   * mapFakeToObservedFilterRule no los leia de vuelta, asi que el doble los perdia
+   * mientras el cliente real si los devuelve.
+   */
+  it('exposes srcAddress and dstAddress in the observed rule, not just in storage', async () => {
+    await client.createFilterRule({
+      action: 'drop',
+      chain: 'forward',
+      comment: 'cuzonet:firewall-filter:addresses',
+      dstAddress: '10.0.0.0/8',
+      srcAddress: '192.168.1.0/24',
+    });
+
+    const [observed] = await client.listFilterRules();
+
+    expect(observed).to.include({ dstAddress: '10.0.0.0/8', srcAddress: '192.168.1.0/24' });
+    expect(await client.findFilterRuleById(observed!.id)).to.include({
+      dstAddress: '10.0.0.0/8',
+      srcAddress: '192.168.1.0/24',
+    });
+    const [byReference] = await client.findFilterRulesByReference('addresses');
+    expect(byReference).to.include({ dstAddress: '10.0.0.0/8', srcAddress: '192.168.1.0/24' });
+  });
+
+  it('omits srcAddress and dstAddress when the rule carries neither', async () => {
+    await client.createFilterRule({
+      action: 'accept',
+      chain: 'input',
+      comment: 'cuzonet:firewall-filter:bare',
+    });
+
+    const [observed] = await client.listFilterRules();
+
+    expect(observed).not.to.have.property('srcAddress');
+    expect(observed).not.to.have.property('dstAddress');
+  });
+
+  it('reflects an updated srcAddress in the observed rule', async () => {
+    await client.createFilterRule({
+      action: 'drop',
+      chain: 'input',
+      comment: 'cuzonet:firewall-filter:upd',
+      srcAddress: '192.168.1.0/24',
+    });
+
+    await client.updateFilterRule(
+      { kind: 'managed-reference', ruleReference: 'upd' },
+      { srcAddress: '10.10.0.0/16' },
+    );
+
+    expect((await client.listFilterRules())[0]).to.include({ srcAddress: '10.10.0.0/16' });
+  });
+
   it('finds a rule by ruleReference and by id', async () => {
     await client.createFilterRule({
       action: 'accept',
