@@ -3,8 +3,22 @@ import { describe, it, expect } from 'vitest';
 import { AddressComment } from '../../../../../backend/domain/provisioning/routeros/value-objects/address-comment.js';
 import { AddressListName } from '../../../../../backend/domain/provisioning/routeros/value-objects/address-list-name.js';
 import { DisabledState } from '../../../../../backend/domain/provisioning/routeros/value-objects/disabled-state.js';
+import { InvalidProvisioningDataError } from '../../../../../backend/domain/provisioning/errors/invalid-provisioning-data.error.js';
 import { IpAddress } from '../../../../../backend/domain/provisioning/routeros/value-objects/ip-address.js';
-import { Timeout } from '../../../../../backend/domain/provisioning/routeros/value-objects/timeout.js';
+
+/**
+ * `InvalidProvisioningDataError` lleva siempre el mismo `message` generico; el motivo
+ * concreto vive en `details[0].message`, que es lo que debe afirmarse.
+ */
+function expectRejection(address: string, reason: RegExp): void {
+  try {
+    IpAddress.create(address);
+    expect.fail(`IpAddress.create('${address}') deberia haber lanzado`);
+  } catch (error) {
+    expect(error, address).to.be.instanceOf(InvalidProvisioningDataError);
+    expect((error as InvalidProvisioningDataError).details?.[0]?.message, address).to.match(reason);
+  }
+}
 
 describe('Firewall Address List value objects', () => {
   describe('AddressListName', () => {
@@ -29,12 +43,6 @@ describe('Firewall Address List value objects', () => {
     it('accepts an IPv4 address with CIDR', () => {
       expect(IpAddress.create('10.0.0.0/24').value).to.equal('10.0.0.0/24');
     });
-    it('accepts a plain IPv6 address', () => {
-      expect(IpAddress.create('2001:db8::1').value).to.equal('2001:db8::1');
-    });
-    it('accepts an IPv6 address with CIDR', () => {
-      expect(IpAddress.create('2001:db8::/32').value).to.equal('2001:db8::/32');
-    });
     it('rejects an out-of-range IPv4 octet', () => {
       expect(() => IpAddress.create('999.1.1.1')).to.throw();
     });
@@ -43,6 +51,42 @@ describe('Firewall Address List value objects', () => {
     });
     it('rejects a non-address string', () => {
       expect(() => IpAddress.create('not-an-address')).to.throw();
+    });
+
+    describe('IPv4 ranges', () => {
+      // RouterOS 7.21.4 acepta el rango y /print lo devuelve literal, sin normalizar.
+      it('accepts a range and preserves it verbatim', () => {
+        expect(IpAddress.create('203.0.113.10-203.0.113.15').value).to.equal('203.0.113.10-203.0.113.15');
+      });
+      it('accepts a range whose endpoints are equal', () => {
+        expect(IpAddress.create('203.0.113.10-203.0.113.10').value).to.equal('203.0.113.10-203.0.113.10');
+      });
+      it('accepts a range that spans octet boundaries', () => {
+        expect(IpAddress.create('10.0.0.250-10.0.1.5').value).to.equal('10.0.0.250-10.0.1.5');
+      });
+      it('rejects an inverted range', () => {
+        expectRejection('203.0.113.15-203.0.113.10', /no puede ser mayor que su final/);
+      });
+      it('rejects CIDR notation on a range endpoint', () => {
+        expectRejection('203.0.113.0/24-203.0.113.15', /sin prefijo CIDR/);
+      });
+      it('rejects the abbreviated range form RouterOS was never confirmed to accept', () => {
+        expect(() => IpAddress.create('203.0.113.10-15')).to.throw();
+      });
+    });
+
+    describe('formats deliberately kept out of the contract', () => {
+      // /ip/firewall/address-list es la tabla IPv4; IPv6 vive en /ipv6/firewall/address-list.
+      it('rejects a plain IPv6 address with an IPv6-specific message', () => {
+        expectRejection('2001:db8::1', /IPv6 no se admiten/);
+      });
+      it('rejects an IPv6 address with CIDR', () => {
+        expectRejection('2001:db8::/32', /IPv6 no se admiten/);
+      });
+      // RouterOS resolveria el nombre y crearia entradas hijas dinamicas.
+      it('rejects a domain name', () => {
+        expectRejection('example.com', /nombres de dominio/);
+      });
     });
   });
 
@@ -55,26 +99,6 @@ describe('Firewall Address List value objects', () => {
     });
     it('rejects control characters', () => {
       expect(() => AddressComment.create('bad\ncomment')).to.throw();
-    });
-  });
-
-  describe('Timeout', () => {
-    it('accepts "none"', () => {
-      expect(Timeout.create('none').isPermanent()).to.equal(true);
-    });
-    it('is case-insensitive for "none"', () => {
-      expect(Timeout.create('NoNe').value).to.equal('none');
-    });
-    it('accepts a compound duration', () => {
-      const timeout = Timeout.create('1d');
-      expect(timeout.value).to.equal('1d');
-      expect(timeout.isPermanent()).to.equal(false);
-    });
-    it('accepts a clock-form duration', () => {
-      expect(Timeout.create('00:30:00').value).to.equal('00:30:00');
-    });
-    it('rejects an invalid duration', () => {
-      expect(() => Timeout.create('forever')).to.throw();
     });
   });
 

@@ -8,14 +8,15 @@ import type {
   RouterOsClientPort,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
+import { InvalidProvisioningDataError } from '../../../domain/provisioning/errors/invalid-provisioning-data.error.js';
 import { RouterOsAddressListConflictError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-conflict.error.js';
+import { RouterOsAddressListDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-dynamic.error.js';
 import { RouterOsAddressListNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-address-list-not-found.error.js';
 import { RouterOsInvalidAddressError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-address.error.js';
 import { AddressComment } from '../../../domain/provisioning/routeros/value-objects/address-comment.js';
 import { AddressListName } from '../../../domain/provisioning/routeros/value-objects/address-list-name.js';
 import { DisabledState } from '../../../domain/provisioning/routeros/value-objects/disabled-state.js';
 import { IpAddress } from '../../../domain/provisioning/routeros/value-objects/ip-address.js';
-import { Timeout } from '../../../domain/provisioning/routeros/value-objects/timeout.js';
 import {
   routerOsAddressListInputSchema,
   type RouterOsAddressListAddInput,
@@ -68,12 +69,11 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     const list = AddressListName.create(command.list);
     const address = IpAddress.create(command.address);
     const comment = command.comment === undefined ? undefined : AddressComment.create(command.comment);
-    const timeout = command.timeout === undefined ? undefined : Timeout.create(command.timeout);
     const disabled = DisabledState.create(command.disabled ?? false);
 
     const existing = await client.findAddressListEntry({ address: address.value, list: list.value });
     if (existing) {
-      if (this.isEquivalent(existing, { comment, disabled, timeout })) {
+      if (this.isEquivalent(existing, { comment, disabled })) {
         return address.value; // Idempotent success
       }
       throw new RouterOsAddressListConflictError(
@@ -86,7 +86,6 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
       ...(comment !== undefined ? { comment: comment.value } : {}),
       disabled: disabled.value,
       list: list.value,
-      ...(timeout !== undefined ? { timeout: timeout.value } : {}),
     };
     await client.createAddressListEntry(createData);
     return address.value;
@@ -107,11 +106,9 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     }
 
     const comment = command.comment === undefined ? undefined : AddressComment.create(command.comment);
-    const timeout = command.timeout === undefined ? undefined : Timeout.create(command.timeout);
 
     const updateData: MutableAddressListEntryUpdateData = {};
     if (comment !== undefined && comment.value !== (existing.comment ?? '')) updateData.comment = comment.value;
-    if (timeout !== undefined && timeout.value !== (existing.timeout ?? '')) updateData.timeout = timeout.value;
     if (command.disabled !== undefined && command.disabled !== existing.disabled) {
       updateData.disabled = command.disabled;
     }
@@ -177,19 +174,35 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     expected: {
       comment: AddressComment | undefined;
       disabled: DisabledState;
-      timeout: Timeout | undefined;
     },
   ): boolean {
     return (
       existing.disabled === expected.disabled.value &&
-      (existing.comment ?? '') === (expected.comment?.value ?? '') &&
-      (existing.timeout ?? '') === (expected.timeout?.value ?? '')
+      (existing.comment ?? '') === (expected.comment?.value ?? '')
     );
   }
 
   protected override additionalLogFields(command: RouterOsAddressListInput): Record<string, unknown> {
     return { address: command.address, addressList: command.list };
   }
+
+  /**
+   * Traps reales de RouterOS 7.21.4 observados en el laboratorio para este recurso. El
+   * heuristico anterior (`message.includes('address')` mas `'invalid'`/`'no such'`) no
+   * acertaba ninguno de los tres: los mensajes del router no contienen la palabra
+   * "address", asi que todos terminaban en ROUTEROS_EXECUTION_FAILED.
+   */
+  private static readonly ROUTER_TRAPS: ReadonlyArray<{
+    readonly errorCode: string;
+    readonly trap: string;
+  }> = [
+    // `/add` sobre una combinacion list+address que ya existe.
+    { errorCode: 'ROUTEROS_ADDRESS_LIST_CONFLICT', trap: 'already have such entry' },
+    // Todo lo que no es IPv4 se interpreta como nombre de dominio, IPv6 incluida.
+    { errorCode: 'ROUTEROS_INVALID_ADDRESS', trap: 'is not a valid dns name' },
+    // `/disable` sobre una entrada que RouterOS gobierna.
+    { errorCode: 'ROUTEROS_ADDRESS_LIST_DYNAMIC', trap: 'cannot have disabled dynamic entry' },
+  ];
 
   protected override mapExecutionError(error: unknown): ProvisioningActionResult {
     if (error instanceof RouterOsAddressListConflictError) {
@@ -206,14 +219,38 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
         outcome: 'permanentFailure',
       };
     }
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    if (message.includes('address') && (message.includes('invalid') || message.includes('no such'))) {
-      const invalid = new RouterOsInvalidAddressError(
-        error instanceof Error ? error.message : 'Direccion invalida.',
-      );
+    if (error instanceof RouterOsAddressListDynamicError) {
+      return {
+        errorCode: 'ROUTEROS_ADDRESS_LIST_DYNAMIC',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsInvalidAddressError) {
       return {
         errorCode: 'ROUTEROS_INVALID_ADDRESS',
-        errorMessage: invalid.message,
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    // Los value objects validan dentro de executeOperation; su fallo es de datos de
+    // entrada, no de ejecucion, y debe reportarse como tal.
+    if (error instanceof InvalidProvisioningDataError) {
+      return {
+        errorCode: 'ROUTEROS_VALIDATION_ERROR',
+        errorMessage: error.details?.[0]?.message ?? error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    const matched = RouterOsFirewallAddressListProvisioningAdapter.ROUTER_TRAPS.find((entry) =>
+      message.includes(entry.trap),
+    );
+    if (matched) {
+      return {
+        errorCode: matched.errorCode,
+        errorMessage: error instanceof Error ? error.message : matched.errorCode,
         outcome: 'permanentFailure',
       };
     }

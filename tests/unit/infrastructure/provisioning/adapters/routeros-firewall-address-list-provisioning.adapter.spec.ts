@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import type { ProvisioningActionInput } from '../../../../../backend/application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
@@ -55,7 +55,6 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
           comment: 'moroso',
           list: 'blocked-ips',
           routerId: 'router-1',
-          timeout: '1d',
         }),
       );
 
@@ -63,7 +62,81 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
       expect(fakeClient.addressListEntries).to.have.length(1);
       expect(fakeClient.addressListEntries[0]?.address).to.equal('192.168.1.10');
       expect(fakeClient.addressListEntries[0]?.list).to.equal('blocked-ips');
-      expect(fakeClient.addressListEntries[0]?.timeout).to.equal('1d');
+      expect(fakeClient.addressListEntries[0]?.comment).to.equal('moroso');
+    });
+
+    it('never sends a timeout to the router, so the entry stays static', async () => {
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+      const createSpy = vi.spyOn(fakeClient, 'createAddressListEntry');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '192.168.1.10',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy.mock.calls[0]?.[0]).not.to.have.property('timeout');
+      expect(fakeClient.addressListEntries[0]?.timeout).to.equal(undefined);
+    });
+
+    it('rejects a payload carrying timeout instead of silently dropping it', async () => {
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+      const createSpy = vi.spyOn(fakeClient, 'createAddressListEntry');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '192.168.1.10',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+          timeout: '1d',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
+      }
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it('accepts an IPv4 range', async () => {
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '203.0.113.10-203.0.113.15',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.addressListEntries[0]?.address).to.equal('203.0.113.10-203.0.113.15');
+    });
+
+    it('rejects IPv6 and domain names before reaching the router', async () => {
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+      const createSpy = vi.spyOn(fakeClient, 'createAddressListEntry');
+
+      for (const address of ['2001:db8::1', 'example.com']) {
+        const result = await adapter.execute(
+          input('routeros.firewall.address-list.add', {
+            address,
+            list: 'blocked-ips',
+            routerId: 'router-1',
+          }),
+        );
+
+        expect(result.outcome, address).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode, address).to.equal('ROUTEROS_VALIDATION_ERROR');
+        }
+      }
+      expect(createSpy).not.toHaveBeenCalled();
     });
 
     it('reports the address and list in the success metadata', async () => {
@@ -337,5 +410,69 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
     if (result.outcome === 'permanentFailure') {
       expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
     }
+  });
+
+  /**
+   * Mensajes textuales capturados de un hEX con RouterOS 7.21.4. El mapeo anterior buscaba
+   * la palabra "address" junto a "invalid"/"no such"; ninguno de los tres traps la contiene,
+   * asi que todos caian en ROUTEROS_EXECUTION_FAILED.
+   */
+  describe('RouterOS trap mapping', () => {
+    const TRAPS: ReadonlyArray<readonly [string, string]> = [
+      ['failure: already have such entry', 'ROUTEROS_ADDRESS_LIST_CONFLICT'],
+      ['failure: 2001:db8::1 is not a valid dns name', 'ROUTEROS_INVALID_ADDRESS'],
+      ['failure: cannot have disabled dynamic entry', 'ROUTEROS_ADDRESS_LIST_DYNAMIC'],
+    ];
+
+    it.each(TRAPS)('maps "%s" to %s', async (trapMessage, expectedCode) => {
+      vi.spyOn(fakeClient, 'createAddressListEntry').mockRejectedValueOnce(new Error(trapMessage));
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '192.168.1.10',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal(expectedCode);
+      }
+    });
+
+    it('still falls back to the generic mapping for an unrecognised failure', async () => {
+      vi.spyOn(fakeClient, 'createAddressListEntry').mockRejectedValueOnce(new Error('failure: something else'));
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '192.168.1.10',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_EXECUTION_FAILED');
+      }
+    });
+
+    it('keeps a connection timeout as a temporary failure', async () => {
+      vi.spyOn(fakeClient, 'createAddressListEntry').mockRejectedValueOnce(new Error('command timeout'));
+      const adapter = adapterFor('routeros.firewall.address-list.add');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.address-list.add', {
+          address: '192.168.1.10',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('temporaryFailure');
+    });
   });
 });
