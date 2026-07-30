@@ -30,6 +30,30 @@ describe('routerOsHotspotUserInputSchema', () => {
     expect(result.success).to.equal(false);
   });
 
+  it('rejects a create payload carrying sharedUsers (profile-only field, not a user property)', () => {
+    const payload = {
+      actionType: 'routeros.hotspot.user.create',
+      credentialReference: 'hotspot-password-cliente-1',
+      name: 'cliente-1',
+      profile: 'default',
+      routerId: 'router-1',
+      sharedUsers: 2,
+    };
+    const result = routerOsHotspotUserInputSchema.safeParse(payload);
+    expect(result.success).to.equal(false);
+  });
+
+  it('rejects an update payload carrying sharedUsers (profile-only field, not a user property)', () => {
+    const payload = {
+      actionType: 'routeros.hotspot.user.update',
+      routerId: 'router-1',
+      sharedUsers: 2,
+      userReference: 'cliente-1',
+    };
+    const result = routerOsHotspotUserInputSchema.safeParse(payload);
+    expect(result.success).to.equal(false);
+  });
+
   it('invalidates a create payload that still carries a plaintext password field', () => {
     const payload = {
       actionType: 'routeros.hotspot.user.create',

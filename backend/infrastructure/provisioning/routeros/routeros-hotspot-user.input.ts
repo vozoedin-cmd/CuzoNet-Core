@@ -53,7 +53,7 @@ export const routerOsHotspotUserCreateSchema = baseRouterOsHotspotUserSchema.ext
     .min(1, 'El servidor no puede estar vacío.')
     .regex(noControlChars, 'El servidor contiene caracteres de control no permitidos.')
     .optional(),
-});
+}).strict();
 export type RouterOsHotspotUserCreateInput = z.infer<typeof routerOsHotspotUserCreateSchema>;
 
 export const routerOsHotspotUserUpdateSchema = baseRouterOsHotspotUserSchema.extend({
@@ -84,7 +84,7 @@ export const routerOsHotspotUserUpdateSchema = baseRouterOsHotspotUserSchema.ext
     .regex(noControlChars, 'El servidor contiene caracteres de control no permitidos.')
     .optional(),
   userReference: z.string().min(1, 'La referencia del usuario no puede estar vacía.'),
-});
+}).strict();
 export type RouterOsHotspotUserUpdateInput = z.infer<typeof routerOsHotspotUserUpdateSchema>;
 
 export const routerOsHotspotUserEnableSchema = baseRouterOsHotspotUserSchema.extend({
