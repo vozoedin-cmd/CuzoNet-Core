@@ -99,6 +99,7 @@ describe('routerOsFilterRuleInputSchema', () => {
       actionType: 'routeros.firewall.filter.add',
       chain: 'forward',
       dstPort: '80,443,1000-2000',
+      protocol: 'tcp',
       routerId: 'router-1',
       ruleReference: 'allow-web',
     };

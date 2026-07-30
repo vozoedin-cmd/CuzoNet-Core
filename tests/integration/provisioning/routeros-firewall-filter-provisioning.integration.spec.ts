@@ -109,7 +109,7 @@ describe('RouterOS Firewall Filter provisioning integration with the Provisionin
         ruleReference: 'block-ssh-wan',
       }),
       targetId: 'block-ssh-wan',
-      targetType: 'filter-rule',
+      targetType: 'Firewall Filter Rule',
     };
 
     const first = await requestProvisioning.execute(input);
@@ -155,7 +155,7 @@ describe('RouterOS Firewall Filter provisioning integration with the Provisionin
         ruleReference: 'block-ssh-wan',
       }),
       targetId: 'block-ssh-wan',
-      targetType: 'filter-rule',
+      targetType: 'Firewall Filter Rule',
     };
     const request = await requestProvisioning.execute(input);
     await requestRepo.claimDue(10, 'worker-1', clock.now());
@@ -179,7 +179,7 @@ describe('RouterOS Firewall Filter provisioning integration with the Provisionin
         ruleReference: 'r2',
       }),
       targetId: 'r2',
-      targetType: 'filter-rule',
+      targetType: 'Firewall Filter Rule',
     });
 
     const requestA = await requestProvisioning.execute(buildInput('request-a'));

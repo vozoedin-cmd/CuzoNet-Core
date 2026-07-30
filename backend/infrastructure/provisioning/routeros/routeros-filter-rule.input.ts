@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const MAX_COMMENT_LENGTH = 200;
 const MAX_RULE_REFERENCE_LENGTH = 128;
+const MAX_ROUTEROS_COMMENT_LENGTH = 255;
 const noControlChars = /^[\x20-\x7E]*$/;
 
 const ruleReferenceSchema = z
@@ -25,7 +26,6 @@ const KNOWN_PROTOCOLS = [
   'tcp',
   'udp',
   'icmp',
-  'icmpv6',
   'gre',
   'ipsec-esp',
   'ipsec-ah',
@@ -46,16 +46,14 @@ const protocolSchema = z
 
 const ipv4Octet = '(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])';
 const ipv4Pattern = new RegExp(`^${ipv4Octet}(\\.${ipv4Octet}){3}(\\/(3[0-2]|[12]?[0-9]))?$`);
-const ipv6Pattern =
-  /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))(\/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))?$/;
 const addressSpecSchema = z
   .string()
   .refine(
     (value) => {
       const address = value.startsWith('!') ? value.slice(1) : value;
-      return ipv4Pattern.test(address) || ipv6Pattern.test(address);
+      return ipv4Pattern.test(address);
     },
-    { message: 'Debe ser una dirección IPv4 o IPv6 válida, con prefijo CIDR y negación "!" opcionales.' },
+    { message: 'Debe ser una dirección IPv4 válida, con prefijo CIDR y negación "!" opcionales. IPv6 no está soportado en esta fase.' },
   )
   .optional();
 
@@ -70,12 +68,16 @@ const portSpecSchema = z
         tokens.every((token) => {
           const parts = token.split('-');
           if (parts.length === 1) return portToken.test(parts[0]!);
-          if (parts.length === 2) return portToken.test(parts[0]!) && portToken.test(parts[1]!);
+          if (parts.length === 2) {
+            const min = parseInt(parts[0]!, 10);
+            const max = parseInt(parts[1]!, 10);
+            return portToken.test(parts[0]!) && portToken.test(parts[1]!) && min <= max;
+          }
           return false;
         })
       );
     },
-    { message: 'Debe ser un puerto, lista separada por comas y/o rangos válidos (1-65535), p.ej. "80,443,1000-2000".' },
+    { message: 'Debe ser un puerto, lista separada por comas y/o rangos válidos (1-65535), sin rangos invertidos.' },
   )
   .optional();
 
@@ -110,6 +112,24 @@ const baseRouterOsFilterRuleSchema = z.object({
   ruleReference: ruleReferenceSchema,
 });
 
+const PROTOCOLS_WITH_PORTS = ['tcp', 'udp', 'sctp', 'dccp'];
+
+function checkPortsRequireProtocol(data: { protocol?: string | undefined, srcPort?: string | undefined, dstPort?: string | undefined }) {
+  if (data.srcPort !== undefined || data.dstPort !== undefined) {
+    if (!data.protocol || !PROTOCOLS_WITH_PORTS.includes(data.protocol.toLowerCase())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function checkCompositeCommentLength(data: { ruleReference: string, comment?: string | undefined }) {
+  const marker = `cuzonet:firewall-filter:${data.ruleReference}`;
+  const trimmed = data.comment?.trim();
+  const total = trimmed && trimmed.length > 0 ? marker.length + 1 + trimmed.length : marker.length;
+  return total <= MAX_ROUTEROS_COMMENT_LENGTH;
+}
+
 export const routerOsFilterRuleAddSchema = baseRouterOsFilterRuleSchema.extend({
   action: actionSchema,
   actionType: z.literal('routeros.firewall.filter.add'),
@@ -125,6 +145,14 @@ export const routerOsFilterRuleAddSchema = baseRouterOsFilterRuleSchema.extend({
   protocol: protocolSchema,
   srcAddress: addressSpecSchema,
   srcPort: portSpecSchema,
+}).strict()
+.refine(checkPortsRequireProtocol, {
+  message: 'Para usar srcPort o dstPort se requiere que el protocolo sea tcp, udp, sctp o dccp.',
+  path: ['protocol'],
+})
+.refine(checkCompositeCommentLength, {
+  message: `El comentario técnico compuesto excede el límite de ${MAX_ROUTEROS_COMMENT_LENGTH} caracteres.`,
+  path: ['comment'],
 });
 export type RouterOsFilterRuleAddInput = z.infer<typeof routerOsFilterRuleAddSchema>;
 
@@ -142,28 +170,36 @@ export const routerOsFilterRuleUpdateSchema = baseRouterOsFilterRuleSchema.exten
   protocol: protocolSchema,
   srcAddress: addressSpecSchema,
   srcPort: portSpecSchema,
+}).strict()
+.refine(checkPortsRequireProtocol, {
+  message: 'Para usar srcPort o dstPort se requiere que el protocolo sea tcp, udp, sctp o dccp.',
+  path: ['protocol'],
+})
+.refine(checkCompositeCommentLength, {
+  message: `El comentario técnico compuesto excede el límite de ${MAX_ROUTEROS_COMMENT_LENGTH} caracteres.`,
+  path: ['comment'],
 });
 export type RouterOsFilterRuleUpdateInput = z.infer<typeof routerOsFilterRuleUpdateSchema>;
 
 export const routerOsFilterRuleMoveSchema = baseRouterOsFilterRuleSchema.extend({
   actionType: z.literal('routeros.firewall.filter.move'),
   position: positionSchema,
-});
+}).strict();
 export type RouterOsFilterRuleMoveInput = z.infer<typeof routerOsFilterRuleMoveSchema>;
 
 export const routerOsFilterRuleEnableSchema = baseRouterOsFilterRuleSchema.extend({
   actionType: z.literal('routeros.firewall.filter.enable'),
-});
+}).strict();
 export type RouterOsFilterRuleEnableInput = z.infer<typeof routerOsFilterRuleEnableSchema>;
 
 export const routerOsFilterRuleDisableSchema = baseRouterOsFilterRuleSchema.extend({
   actionType: z.literal('routeros.firewall.filter.disable'),
-});
+}).strict();
 export type RouterOsFilterRuleDisableInput = z.infer<typeof routerOsFilterRuleDisableSchema>;
 
 export const routerOsFilterRuleRemoveSchema = baseRouterOsFilterRuleSchema.extend({
   actionType: z.literal('routeros.firewall.filter.remove'),
-});
+}).strict();
 export type RouterOsFilterRuleRemoveInput = z.infer<typeof routerOsFilterRuleRemoveSchema>;
 
 export const routerOsFilterRuleInputSchema = z.discriminatedUnion('actionType', [

@@ -16,7 +16,7 @@ function input(actionType: string, payload: Record<string, unknown>, requestId =
     idempotencyKey: 'key-1',
     inputSnapshotJson: JSON.stringify({ actionType, ...payload }),
     requestId,
-    target: { id: 'target-1', type: 'RouterOS' },
+    target: { id: payload['ruleReference'] as string ?? 'target-1', type: 'Firewall Filter Rule' },
   };
 }
 
@@ -373,7 +373,7 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       idempotencyKey: 'key-1',
       inputSnapshotJson: '{ invalid json }',
       requestId: 'req-2',
-      target: { id: 'target-1', type: 'RouterOS' },
+      target: { id: 'target-1', type: 'Firewall Filter Rule' },
     };
 
     const result = await adapter.execute(badInput);
@@ -400,5 +400,188 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
     if (result.outcome === 'permanentFailure') {
       expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
     }
+  });
+
+  describe('Pre-validation invariants (Phase 1)', () => {
+    it('rejects if targetType is incorrect', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const badInput: ProvisioningActionInput = {
+        actionType: 'routeros.firewall.filter.add',
+        attemptNumber: 1,
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: 'key-1',
+        inputSnapshotJson: JSON.stringify({ actionType: 'routeros.firewall.filter.add', routerId: 'r1', ruleReference: 'r1' }),
+        requestId: 'req',
+        target: { id: 'r1', type: 'RouterOS' }, // wrong type
+      };
+
+      const result = await adapter.execute(badInput);
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_TARGET_TYPE');
+      }
+      expect(fakeClient.filterRules).to.have.length(0); // Client not invoked
+    });
+
+    it('rejects if external actionType does not match internal actionType', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const badInput: ProvisioningActionInput = {
+        actionType: 'routeros.firewall.filter.add',
+        attemptNumber: 1,
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: 'key-1',
+        inputSnapshotJson: JSON.stringify({ actionType: 'routeros.firewall.filter.remove', routerId: 'r1', ruleReference: 'r1' }),
+        requestId: 'req',
+        target: { id: 'r1', type: 'Firewall Filter Rule' },
+      };
+
+      const result = await adapter.execute(badInput);
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_ACTION_MISMATCH');
+      }
+    });
+
+    it('rejects if external targetId does not match internal ruleReference', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const badInput: ProvisioningActionInput = {
+        actionType: 'routeros.firewall.filter.add',
+        attemptNumber: 1,
+        companyId: 'company-1',
+        configurationReference: undefined,
+        idempotencyKey: 'key-1',
+        inputSnapshotJson: JSON.stringify({ actionType: 'routeros.firewall.filter.add', routerId: 'r1', ruleReference: 'rule-A' }),
+        requestId: 'req',
+        target: { id: 'rule-B', type: 'Firewall Filter Rule' },
+      };
+
+      const result = await adapter.execute(badInput);
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_TARGET_MISMATCH');
+      }
+    });
+
+    it('rejects unknown properties (strict schema)', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          routerId: 'router-1',
+          ruleReference: 'r1',
+          unknownProp: 'invalid',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
+      }
+    });
+
+    it('rejects log, logPrefix, jumpTarget, dynamic, .id (strict schema)', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const fields = ['log', 'logPrefix', 'jumpTarget', 'dynamic', '.id'];
+      for (const field of fields) {
+        const result = await adapter.execute(
+          input('routeros.firewall.filter.add', {
+            action: 'accept',
+            chain: 'input',
+            routerId: 'router-1',
+            ruleReference: 'r1',
+            [field]: 'any',
+          }),
+        );
+        expect(result.outcome).to.equal('permanentFailure');
+      }
+    });
+
+    it('rejects IPv6 address', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          routerId: 'router-1',
+          ruleReference: 'r1',
+          srcAddress: '2001:db8::/32',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
+
+    it('rejects icmpv6 protocol', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          protocol: 'icmpv6',
+          routerId: 'router-1',
+          ruleReference: 'r1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
+
+    it('rejects inverted port ranges', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          dstPort: '2000-1000',
+          protocol: 'tcp',
+          routerId: 'router-1',
+          ruleReference: 'r1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
+
+    it('rejects ports without a compatible protocol', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          dstPort: '80', // Protocol is missing
+          routerId: 'router-1',
+          ruleReference: 'r1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
+
+    it('rejects a composite comment that exceeds RouterOS limit', async () => {
+      const adapter = adapterFor('routeros.firewall.filter.add');
+      const reference = 'a'.repeat(128); // valid by itself
+      // marker length = 24 + 128 = 152. RouterOS max = 255.
+      // 255 - 152 = 103 chars left for comment. Space takes 1. We need 102 for comment.
+      // Let's pass 150 chars for comment, which exceeds 255 total.
+      const comment = 'b'.repeat(150);
+
+      const result = await adapter.execute(
+        input('routeros.firewall.filter.add', {
+          action: 'accept',
+          chain: 'input',
+          comment,
+          routerId: 'router-1',
+          ruleReference: reference,
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
   });
 });

@@ -1,4 +1,7 @@
-import type { ProvisioningActionResult } from '../../../application/ports/provisioning/provisioning-action-adapter.port.js';
+import type {
+  ProvisioningActionInput,
+  ProvisioningActionResult,
+} from '../../../application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../application/ports/provisioning/routeros/router-connection-resolver.port.js';
 import type {
   RouterOsClientFactoryPort,
@@ -61,6 +64,40 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     clientFactory: RouterOsClientFactoryPort,
   ) {
     super(type, routerOsFilterRuleInputSchema, connectionResolver, secretProvider, clientFactory);
+  }
+
+  public override async execute(input: ProvisioningActionInput): Promise<ProvisioningActionResult> {
+    if (input.target.type !== 'Firewall Filter Rule') {
+      return {
+        errorCode: 'ROUTEROS_INVALID_TARGET_TYPE',
+        errorMessage: `El targetType (${input.target.type}) es inválido para reglas de firewall.`,
+        outcome: 'permanentFailure',
+      };
+    }
+
+    try {
+      const payload = JSON.parse(input.inputSnapshotJson);
+      
+      if (payload.actionType && payload.actionType !== input.actionType) {
+        return {
+          errorCode: 'ROUTEROS_ACTION_MISMATCH',
+          errorMessage: `El actionType externo (${input.actionType}) no coincide con el interno (${payload.actionType}).`,
+          outcome: 'permanentFailure',
+        };
+      }
+
+      if (payload.ruleReference && payload.ruleReference !== input.target.id) {
+         return {
+           errorCode: 'ROUTEROS_TARGET_MISMATCH',
+           errorMessage: `El targetId externo (${input.target.id}) no coincide con ruleReference (${payload.ruleReference}).`,
+           outcome: 'permanentFailure',
+         };
+      }
+    } catch {
+       // Let base class handle invalid JSON
+    }
+
+    return super.execute(input);
   }
 
   protected executeOperation(
