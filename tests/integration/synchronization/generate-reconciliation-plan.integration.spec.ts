@@ -165,6 +165,46 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
     expect(plan.items[0]).to.include({ reference: 'blocked-ips:192.168.1.10', status: 'unexpected' });
   });
 
+  /**
+   * Una entrada dinámica la gobierna RouterOS y desaparece sola, así que CuzoNet no puede
+   * haberla deseado nunca. Reportarla como `unexpected` inventaría una divergencia y
+   * contradiría al aprovisionamiento, que ya se niega a operar sobre ellas.
+   */
+  it('never reports a dynamic address-list entry as unexpected', async () => {
+    fakeClient.addressListEntries.push({
+      address: '192.168.1.198',
+      disabled: false,
+      dynamic: true,
+      id: '*10',
+      list: 'blocked-ips',
+    });
+
+    const plan = await useCase.execute({ resourceTypes: ['address-list-entry'], routerId: 'router-1' });
+
+    expect(plan.items).to.deep.equal([]);
+    expect(plan.summary.unexpected).to.equal(0);
+  });
+
+  /**
+   * Contrapunto: una entrada estática que CuzoNet nunca provisionó SÍ debe reportarse.
+   * `unexpected` significa "CuzoNet no es su dueño", nunca "hay que borrarla" — el router
+   * de laboratorio conserva siete entradas de 2023 que nadie referencia.
+   */
+  it('still reports a static entry CuzoNet never provisioned, without proposing any action', async () => {
+    await fakeClient.createAddressListEntry({
+      address: '192.168.10.255',
+      comment: 'X/31/2023 19:28 Router Cesar',
+      list: 'MOROSOS',
+    });
+
+    const plan = await useCase.execute({ resourceTypes: ['address-list-entry'], routerId: 'router-1' });
+
+    expect(plan.items).to.have.length(1);
+    expect(plan.items[0]).to.include({ reference: 'MOROSOS:192.168.10.255', status: 'unexpected' });
+    expect(plan.items[0]?.desiredFields).to.equal(undefined);
+    expect(plan.mode).to.equal('dry-run');
+  });
+
   it('produces an empty, fully in-sync-free plan when nothing was ever provisioned or found', async () => {
     const plan = await useCase.execute({ routerId: 'router-1' });
 

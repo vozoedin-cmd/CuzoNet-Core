@@ -52,6 +52,37 @@ describe('RouterOsActualStateReader', () => {
     ]);
   });
 
+  /**
+   * Las entradas dinámicas las gobierna RouterOS y desaparecen solas. Incluirlas las
+   * mostraría como `unexpected`, sugiriendo una divergencia inexistente y contradiciendo
+   * al aprovisionamiento, que ya se niega a tocarlas.
+   */
+  it('excludes dynamic address-list entries from the actual state', async () => {
+    await fakeClient.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
+    fakeClient.addressListEntries.push({
+      address: '192.168.1.198',
+      disabled: false,
+      dynamic: true,
+      id: '*10',
+      list: 'blocked-ips',
+    });
+
+    const records = await reader.readActualState('company-1', 'router-1', 'address-list-entry');
+
+    expect(records.map((record) => record.reference)).to.deep.equal(['blocked-ips:192.168.1.10']);
+  });
+
+  it('returns nothing when every address-list entry on the router is dynamic', async () => {
+    fakeClient.addressListEntries.push(
+      { address: '192.168.1.198', disabled: false, dynamic: true, id: '*10', list: 'blocked-ips' },
+      { address: '172.66.147.243', disabled: false, dynamic: true, id: '*11', list: 'blocked-ips' },
+    );
+
+    const records = await reader.readActualState('company-1', 'router-1', 'address-list-entry');
+
+    expect(records).to.deep.equal([]);
+  });
+
   it('normalizes filter rules by their comment marker reference', async () => {
     await fakeClient.createFilterRule({
       action: 'drop',

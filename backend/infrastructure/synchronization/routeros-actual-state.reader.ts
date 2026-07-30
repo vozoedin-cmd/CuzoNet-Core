@@ -35,6 +35,27 @@ function normalizeSimpleQueue(queue: RouterOsSimpleQueue): NormalizedResourceRec
   };
 }
 
+/**
+ * Una entrada `dynamic=true` la gobierna RouterOS: la genera una regla
+ * `add-src-to-address-list`, la resolución de un nombre de dominio o un `timeout`. No se
+ * guarda en la configuración y desaparece sola.
+ *
+ * Queda fuera del estado real por completo. Incluirla la haría aparecer como `unexpected`
+ * —CuzoNet nunca puede haberla deseado— sugiriendo una divergencia que no existe, y
+ * contradiría al aprovisionamiento, que ya se niega a tocar estas entradas.
+ */
+function isManageableAddressListEntry(entry: RouterOsAddressListEntry): boolean {
+  return !entry.dynamic;
+}
+
+/**
+ * A diferencia de las reglas de firewall, una entrada de address-list SÍ tiene clave
+ * natural estable (`list:address`), presente por igual en el router y en el historial de
+ * aprovisionamiento. No necesita un marcador en el comentario para recuperar su identidad:
+ * `unexpected` ya significa exactamente "existe en el router y CuzoNet nunca la provisionó".
+ * Por eso `comment` puede compararse como campo de usuario, cosa que en las reglas no se
+ * hace porque ahí el comentario carga el marcador técnico.
+ */
 function normalizeAddressListEntry(entry: RouterOsAddressListEntry): NormalizedResourceRecord {
   return {
     disabled: entry.disabled,
@@ -96,7 +117,9 @@ export class RouterOsActualStateReader implements ActualStateReader {
         case 'simple-queue':
           return (await client.listSimpleQueues()).map(normalizeSimpleQueue);
         case 'address-list-entry':
-          return (await client.listAddressListEntries()).map(normalizeAddressListEntry);
+          return (await client.listAddressListEntries())
+            .filter(isManageableAddressListEntry)
+            .map(normalizeAddressListEntry);
         case 'filter-rule':
           return (await client.listFilterRules()).map(normalizeFilterRule);
         case 'nat-rule':
