@@ -4,11 +4,11 @@ import { LibraryRouterOsClient } from '../../../backend/infrastructure/provision
 import { createFakeRouterOsServer, type FakeRouterOsServer } from './routeros-wire-protocol-test-harness.js';
 
 /**
- * Regression coverage for the `disabled` boolean-parsing bug already fixed for
- * Simple Queue and PPPoE: the RouterOS binary API represents booleans as
- * "yes"/"no", never "true"/"false" (that form is exclusive to the REST API).
- * `findHotspotUser()` used to check `reply.disabled === 'true'`, which never
- * matches a real router response.
+ * Coverage for `disabled` boolean parsing. RouterOS represents booleans differently
+ * depending on version/transport, so `findHotspotUser()` must accept both known forms:
+ * "true"/"false" (what RouterOS 7.21.4 returns over the binary API — verified E2E
+ * against a real hEX) and "yes"/"no" (the classic documented form). Anything else,
+ * including an absent field, must map to `false`.
  */
 describe('LibraryRouterOsClient wire protocol (Hotspot) — disabled parsing', () => {
   let harness: FakeRouterOsServer;
@@ -72,7 +72,7 @@ describe('LibraryRouterOsClient wire protocol (Hotspot) — disabled parsing', (
     }
   });
 
-  it('still accepts the legacy REST-style "true" value (kept for tolerance, matching Simple Queue/PPPoE)', async () => {
+  it('maps disabled="true" to true (the form RouterOS 7.21.4 actually returns over the binary API)', async () => {
     harness.existingRecord = {
       '.id': '*H1',
       disabled: 'true',
