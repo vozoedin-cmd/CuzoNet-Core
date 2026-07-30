@@ -376,6 +376,98 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
     });
   });
 
+  /**
+   * Las entradas `dynamic=true` las gobierna RouterOS (reglas add-src-to-address-list,
+   * resolucion de nombres de dominio, timeout). El router solo rechaza `/disable`; acepta
+   * `/set` y `/remove`. CuzoNet rechaza las cinco operaciones a proposito, y siempre antes
+   * de emitir ningun comando.
+   */
+  describe('dynamic entry guard', () => {
+    const DYNAMIC_ENTRY = {
+      address: '192.168.1.198',
+      disabled: false,
+      dynamic: true,
+      id: '*10',
+      list: 'blocked-ips',
+    };
+
+    beforeEach(() => {
+      fakeClient.addressListEntries.push({ ...DYNAMIC_ENTRY });
+    });
+
+    const OPERATIONS = [
+      ['add', 'createAddressListEntry'],
+      ['update', 'updateAddressListEntry'],
+      ['enable', 'enableAddressListEntry'],
+      ['disable', 'disableAddressListEntry'],
+      ['remove', 'removeAddressListEntry'],
+    ] as const;
+
+    it.each(OPERATIONS)('refuses %s and never calls the router', async (operation, clientMethod) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.address-list.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, {
+          address: DYNAMIC_ENTRY.address,
+          list: DYNAMIC_ENTRY.list,
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_ADDRESS_LIST_DYNAMIC');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(fakeClient.addressListEntries).to.deep.equal([DYNAMIC_ENTRY]);
+    });
+
+    it('reports which entry is dynamic without leaking anything else', async () => {
+      const result = await adapterFor('routeros.firewall.address-list.remove').execute(
+        input('routeros.firewall.address-list.remove', {
+          address: DYNAMIC_ENTRY.address,
+          list: DYNAMIC_ENTRY.list,
+          routerId: 'router-1',
+        }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain('blocked-ips:192.168.1.198');
+      }
+    });
+
+    it('does not block a static entry that shares the address in another list', async () => {
+      await fakeClient.createAddressListEntry({ address: DYNAMIC_ENTRY.address, list: 'trusted-ips' });
+
+      const result = await adapterFor('routeros.firewall.address-list.remove').execute(
+        input('routeros.firewall.address-list.remove', {
+          address: DYNAMIC_ENTRY.address,
+          list: 'trusted-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.addressListEntries).to.deep.equal([DYNAMIC_ENTRY]);
+    });
+
+    it('still reports NOT_FOUND, not DYNAMIC, when the entry does not exist at all', async () => {
+      const result = await adapterFor('routeros.firewall.address-list.enable').execute(
+        input('routeros.firewall.address-list.enable', {
+          address: '10.0.0.99',
+          list: 'blocked-ips',
+          routerId: 'router-1',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_ADDRESS_LIST_NOT_FOUND');
+      }
+    });
+  });
+
   it('rejects an invalid JSON payload', async () => {
     const adapter = adapterFor('routeros.firewall.address-list.add');
     const badInput: ProvisioningActionInput = {

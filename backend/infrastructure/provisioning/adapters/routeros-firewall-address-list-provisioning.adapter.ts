@@ -73,6 +73,9 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
 
     const existing = await client.findAddressListEntry({ address: address.value, list: list.value });
     if (existing) {
+      // Una entrada dinamica ocupa la clave natural pero no es administrable: no puede
+      // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
+      this.assertNotDynamic(existing);
       if (this.isEquivalent(existing, { comment, disabled })) {
         return address.value; // Idempotent success
       }
@@ -105,6 +108,8 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
       );
     }
 
+    this.assertNotDynamic(existing);
+
     const comment = command.comment === undefined ? undefined : AddressComment.create(command.comment);
 
     const updateData: MutableAddressListEntryUpdateData = {};
@@ -126,6 +131,7 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     command: RouterOsAddressListEnableInput,
   ): Promise<string> {
     const existing = await this.findOrThrow(client, command.list, command.address);
+    this.assertNotDynamic(existing);
     if (!existing.disabled) {
       return command.address; // Idempotent success: already enabled
     }
@@ -138,6 +144,7 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     command: RouterOsAddressListDisableInput,
   ): Promise<string> {
     const existing = await this.findOrThrow(client, command.list, command.address);
+    this.assertNotDynamic(existing);
     if (existing.disabled) {
       return command.address; // Idempotent success: already disabled
     }
@@ -153,8 +160,30 @@ export class RouterOsFirewallAddressListProvisioningAdapter extends RouterOsProv
     if (!existing) {
       return command.address; // Idempotent success: already gone
     }
+    this.assertNotDynamic(existing);
     await client.removeAddressListEntry({ id: existing.id });
     return command.address;
+  }
+
+  /**
+   * RouterOS gobierna las entradas `dynamic=true`: las genera una regla
+   * `add-src-to-address-list`, la resolucion de un nombre de dominio o un `timeout`. No se
+   * guardan en la configuracion y desapareceran solas.
+   *
+   * El router acepta `/set` y `/remove` sobre ellas y solo rechaza `/disable`. CuzoNet las
+   * rechaza todas, a proposito: una entrada efimera no pertenece al estado deseado, y un
+   * `remove` "exitoso" sobre algo que iba a evaporarse enmascara un error de modelado
+   * aguas arriba en lugar de senalarlo. La comprobacion ocurre antes de cualquier comando.
+   */
+  private assertNotDynamic(entry: RouterOsAddressListEntry): void {
+    if (!entry.dynamic) {
+      return;
+    }
+    throw new RouterOsAddressListDynamicError(
+      `La entrada ${entry.list}:${entry.address} es dinamica y la administra RouterOS, ` +
+        'no CuzoNet. Las entradas dinamicas no se pueden crear, modificar, habilitar, ' +
+        'deshabilitar ni eliminar desde el aprovisionamiento.',
+    );
   }
 
   private async findOrThrow(
