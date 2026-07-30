@@ -16,6 +16,10 @@ import type {
   RouterOsHotspotUserCreateData,
   RouterOsHotspotUserReference,
   RouterOsHotspotUserUpdateData,
+  RouterOsHotspotUserProfile,
+  RouterOsHotspotUserProfileCreateData,
+  RouterOsHotspotUserProfileReference,
+  RouterOsHotspotUserProfileUpdateData,
   RouterOsAddressListEntry,
   RouterOsAddressListEntryCreateData,
   RouterOsAddressListEntryReference,
@@ -426,6 +430,65 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (Object.keys(attributes).length === 1) return;
 
     await this.client.execute('/ip/hotspot/user/set', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async createHotspotUserProfile(profile: RouterOsHotspotUserProfileCreateData): Promise<void> {
+    await this.client.execute('/ip/hotspot/user/profile/add', {
+      attributes: hotspotUserProfileAttributes(profile, { name: profile.name }),
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+  ): Promise<RouterOsHotspotUserProfile | null> {
+    if (reference.id === undefined && reference.name === undefined) {
+      return null;
+    }
+    const query = reference.id !== undefined ? `?.id=${reference.id}` : `?name=${reference.name}`;
+
+    const replies = await this.client.print('/ip/hotspot/user/profile', {
+      attributes: { '.proplist': HOTSPOT_USER_PROFILE_PROPLIST },
+      queries: [query],
+      timeoutMs: this.timeoutMs,
+    });
+
+    const reply = replies[0];
+    return reply ? mapReplyToHotspotUserProfile(reply) : null;
+  }
+
+  public async listHotspotUserProfiles(): Promise<RouterOsHotspotUserProfile[]> {
+    const replies = await this.client.print('/ip/hotspot/user/profile', {
+      attributes: { '.proplist': HOTSPOT_USER_PROFILE_PROPLIST },
+      timeoutMs: this.timeoutMs,
+    });
+    return replies.map(mapReplyToHotspotUserProfile);
+  }
+
+  public async removeHotspotUserProfile(reference: RouterOsHotspotUserProfileReference): Promise<void> {
+    const profile = await this.findHotspotUserProfile(reference);
+    if (!profile) return;
+
+    await this.client.execute('/ip/hotspot/user/profile/remove', {
+      attributes: { numbers: profile.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updateHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+    data: RouterOsHotspotUserProfileUpdateData,
+  ): Promise<void> {
+    const profile = await this.findHotspotUserProfile(reference);
+    if (!profile) return;
+
+    const attributes = hotspotUserProfileAttributes(data, { numbers: profile.id });
+    if (Object.keys(attributes).length === 1) return;
+
+    await this.client.execute('/ip/hotspot/user/profile/set', {
       attributes,
       timeoutMs: this.timeoutMs,
     });
@@ -939,6 +1002,71 @@ function mapReplyToSimpleQueue(reply: RouterOSRecord): RouterOsSimpleQueue {
     maxLimit: reply['max-limit'] ?? '',
     name: reply.name ?? '',
     target: reply.target ?? '',
+  };
+}
+
+/**
+ * Propiedades pedidas para un Hotspot User Profile.
+ *
+ * `on-login` y `on-logout` se EXCLUYEN deliberadamente: son scripts RouterOS que pueden
+ * llegar a varios KB y contener credenciales embebidas (se observó un token de bot en un
+ * router real). No pedirlos evita traerlos a memoria, a logs y a los snapshots de
+ * ProvisioningRequest. Gestionarlos requiere una estrategia de secretos propia.
+ */
+const HOTSPOT_USER_PROFILE_PROPLIST =
+  '.id,name,default,address-pool,session-timeout,idle-timeout,keepalive-timeout,status-autorefresh,shared-users,rate-limit,add-mac-cookie,mac-cookie-timeout,address-list,transparent-proxy';
+
+/**
+ * Serializa los campos de un Hotspot User Profile a atributos de RouterOS. Se comparte
+ * entre `add` y `set` porque el conjunto de campos es idéntico; `base` aporta la clave
+ * discriminante (`name` al crear, `numbers` al actualizar).
+ *
+ * Nota de comportamiento real: enviar `mac-cookie-timeout` hace que RouterOS 7.21.4 fuerce
+ * `add-mac-cookie=true` en silencio, ignorando un `add-mac-cookie=no` presente en el mismo
+ * comando. La validación cruzada vive en el schema, no aquí, para que el cliente siga siendo
+ * un traductor fiel de lo que se le pide.
+ */
+function hotspotUserProfileAttributes(
+  data: RouterOsHotspotUserProfileCreateData | RouterOsHotspotUserProfileUpdateData,
+  base: Record<string, string>,
+): Record<string, string> {
+  const attributes: Record<string, string> = { ...base };
+  if (data.name !== undefined && base.name === undefined) attributes.name = data.name;
+  if (data.addressPool !== undefined) attributes['address-pool'] = data.addressPool;
+  if (data.sessionTimeout !== undefined) attributes['session-timeout'] = data.sessionTimeout;
+  if (data.idleTimeout !== undefined) attributes['idle-timeout'] = data.idleTimeout;
+  if (data.keepaliveTimeout !== undefined) attributes['keepalive-timeout'] = data.keepaliveTimeout;
+  if (data.statusAutorefresh !== undefined) attributes['status-autorefresh'] = data.statusAutorefresh;
+  if (data.sharedUsers !== undefined) attributes['shared-users'] = data.sharedUsers;
+  if (data.rateLimit !== undefined) attributes['rate-limit'] = data.rateLimit;
+  if (data.macCookieTimeout !== undefined) attributes['mac-cookie-timeout'] = data.macCookieTimeout;
+  if (data.addressList !== undefined) attributes['address-list'] = data.addressList;
+  if (data.addMacCookie !== undefined) attributes['add-mac-cookie'] = data.addMacCookie ? 'yes' : 'no';
+  if (data.transparentProxy !== undefined) attributes['transparent-proxy'] = data.transparentProxy ? 'yes' : 'no';
+  return attributes;
+}
+
+function mapReplyToHotspotUserProfile(reply: RouterOSRecord): RouterOsHotspotUserProfile {
+  return {
+    ...(reply['add-mac-cookie'] !== undefined
+      ? { addMacCookie: parseRouterOsBoolean(reply['add-mac-cookie']) }
+      : {}),
+    // address-list tiene "" como default en RouterOS: se conserva tal cual, no se omite.
+    ...(reply['address-list'] !== undefined ? { addressList: reply['address-list'] } : {}),
+    ...(reply['address-pool'] ? { addressPool: reply['address-pool'] } : {}),
+    id: reply['.id'] ?? '',
+    ...(reply['idle-timeout'] ? { idleTimeout: reply['idle-timeout'] } : {}),
+    isDefault: parseRouterOsBoolean(reply.default),
+    ...(reply['keepalive-timeout'] ? { keepaliveTimeout: reply['keepalive-timeout'] } : {}),
+    ...(reply['mac-cookie-timeout'] ? { macCookieTimeout: reply['mac-cookie-timeout'] } : {}),
+    name: reply.name ?? '',
+    ...(reply['rate-limit'] ? { rateLimit: reply['rate-limit'] } : {}),
+    ...(reply['session-timeout'] ? { sessionTimeout: reply['session-timeout'] } : {}),
+    ...(reply['shared-users'] ? { sharedUsers: reply['shared-users'] } : {}),
+    ...(reply['status-autorefresh'] ? { statusAutorefresh: reply['status-autorefresh'] } : {}),
+    ...(reply['transparent-proxy'] !== undefined
+      ? { transparentProxy: parseRouterOsBoolean(reply['transparent-proxy']) }
+      : {}),
   };
 }
 

@@ -51,6 +51,7 @@ import { DisabledRouterOsProvisioningAdapter } from './infrastructure/provisioni
 import { RouterOsSimpleQueueProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-simple-queue-provisioning.adapter.js';
 import { RouterOsPppoeProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-pppoe-provisioning.adapter.js';
 import { RouterOsHotspotProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-provisioning.adapter.js';
+import { RouterOsHotspotUserProfileProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-hotspot-user-profile-provisioning.adapter.js';
 import { RouterOsFirewallAddressListProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-address-list-provisioning.adapter.js';
 import { RouterOsFirewallFilterProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-firewall-filter-provisioning.adapter.js';
 import { RouterOsNatProvisioningAdapter } from './infrastructure/provisioning/adapters/routeros-nat-provisioning.adapter.js';
@@ -613,6 +614,33 @@ const provisioningActionAdapters = new Map<string, ProvisioningActionAdapter>([
     'routeros.hotspot.user.remove',
     new RouterOsHotspotProvisioningAdapter(
       'routeros.hotspot.user.remove',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user_profile.create',
+    new RouterOsHotspotUserProfileProvisioningAdapter(
+      'routeros.hotspot.user_profile.create',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user_profile.update',
+    new RouterOsHotspotUserProfileProvisioningAdapter(
+      'routeros.hotspot.user_profile.update',
+      new EnvironmentRouterConnectionResolver(),
+      new EnvironmentSecretProvider(),
+      new SystemRouterOsClientFactory(),
+    ),
+  ],
+  [
+    'routeros.hotspot.user_profile.remove',
+    new RouterOsHotspotUserProfileProvisioningAdapter(
+      'routeros.hotspot.user_profile.remove',
       new EnvironmentRouterConnectionResolver(),
       new EnvironmentSecretProvider(),
       new SystemRouterOsClientFactory(),

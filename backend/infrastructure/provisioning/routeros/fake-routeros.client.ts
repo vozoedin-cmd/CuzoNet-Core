@@ -12,6 +12,10 @@ import type {
   RouterOsHotspotUserCreateData,
   RouterOsHotspotUserReference,
   RouterOsHotspotUserUpdateData,
+  RouterOsHotspotUserProfile,
+  RouterOsHotspotUserProfileCreateData,
+  RouterOsHotspotUserProfileReference,
+  RouterOsHotspotUserProfileUpdateData,
   RouterOsAddressListEntry,
   RouterOsAddressListEntryCreateData,
   RouterOsAddressListEntryReference,
@@ -32,6 +36,7 @@ import type {
   RouterOsMangleRuleReference,
   RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
+import { ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
@@ -41,6 +46,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public queues: RouterOsSimpleQueue[] = [];
   public secrets: RouterOsPppoeSecret[] = [];
   public hotspotUsers: RouterOsHotspotUser[] = [];
+  public hotspotUserProfiles: RouterOsHotspotUserProfile[] = [];
   public addressListEntries: RouterOsAddressListEntry[] = [];
   public filterRules: RouterOsFilterRule[] = [];
   public natRules: RouterOsNatRule[] = [];
@@ -323,6 +329,110 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.server !== undefined ? { server: data.server } : {}),
     };
     this.hotspotUsers[index] = userData;
+  }
+
+  /**
+   * Replica el comportamiento observado en RouterOS 7.21.4, no una versión idealizada:
+   * los campos omitidos reciben los defaults reales del router, y especificar
+   * `macCookieTimeout` fuerza `addMacCookie = true` en silencio. Los tres bugs de la saga
+   * anterior (print duplicado, parseo de disabled, shared-users) sobrevivieron a las
+   * pruebas precisamente porque el doble era más permisivo que el equipo real.
+   */
+  public async createHotspotUserProfile(profile: RouterOsHotspotUserProfileCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    if (this.hotspotUserProfiles.some((p) => p.name === profile.name)) {
+      throw new Error(`Hotspot user profile already exists: ${profile.name}`);
+    }
+    const addMacCookie =
+      profile.macCookieTimeout !== undefined
+        ? true
+        : (profile.addMacCookie ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.addMacCookie);
+
+    this.hotspotUserProfiles.push({
+      addMacCookie,
+      addressList: profile.addressList ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.addressList,
+      ...(profile.addressPool !== undefined && profile.addressPool !== 'none'
+        ? { addressPool: profile.addressPool }
+        : {}),
+      id: `*${this.nextId++}`,
+      idleTimeout: profile.idleTimeout ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.idleTimeout,
+      isDefault: false,
+      keepaliveTimeout: profile.keepaliveTimeout ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.keepaliveTimeout,
+      macCookieTimeout: profile.macCookieTimeout ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.macCookieTimeout,
+      name: profile.name,
+      ...(profile.rateLimit !== undefined ? { rateLimit: profile.rateLimit } : {}),
+      ...(profile.sessionTimeout !== undefined ? { sessionTimeout: profile.sessionTimeout } : {}),
+      sharedUsers: profile.sharedUsers ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.sharedUsers,
+      statusAutorefresh: profile.statusAutorefresh ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.statusAutorefresh,
+      transparentProxy: profile.transparentProxy ?? ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS.transparentProxy,
+    });
+  }
+
+  public async findHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+  ): Promise<RouterOsHotspotUserProfile | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const found = this.hotspotUserProfiles.find(
+      (p) =>
+        (reference.id !== undefined && p.id === reference.id) ||
+        (reference.name !== undefined && p.name === reference.name),
+    );
+    return found ?? null;
+  }
+
+  public async listHotspotUserProfiles(): Promise<RouterOsHotspotUserProfile[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return [...this.hotspotUserProfiles];
+  }
+
+  public async removeHotspotUserProfile(reference: RouterOsHotspotUserProfileReference): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const profile = await this.findHotspotUserProfile(reference);
+    if (!profile) {
+      return;
+    }
+    this.hotspotUserProfiles = this.hotspotUserProfiles.filter((p) => p.id !== profile.id);
+  }
+
+  public async updateHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+    data: RouterOsHotspotUserProfileUpdateData,
+  ): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const profile = await this.findHotspotUserProfile(reference);
+    if (!profile) {
+      return;
+    }
+    const index = this.hotspotUserProfiles.findIndex((p) => p.id === profile.id);
+    // Misma interacción que en el router real: fijar el timeout de la cookie la activa.
+    const addMacCookie =
+      data.macCookieTimeout !== undefined ? true : (data.addMacCookie ?? profile.addMacCookie);
+
+    this.hotspotUserProfiles[index] = {
+      ...profile,
+      ...(addMacCookie !== undefined ? { addMacCookie } : {}),
+      ...(data.addressList !== undefined ? { addressList: data.addressList } : {}),
+      ...(data.addressPool !== undefined ? { addressPool: data.addressPool } : {}),
+      ...(data.idleTimeout !== undefined ? { idleTimeout: data.idleTimeout } : {}),
+      ...(data.keepaliveTimeout !== undefined ? { keepaliveTimeout: data.keepaliveTimeout } : {}),
+      ...(data.macCookieTimeout !== undefined ? { macCookieTimeout: data.macCookieTimeout } : {}),
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.rateLimit !== undefined ? { rateLimit: data.rateLimit } : {}),
+      ...(data.sessionTimeout !== undefined ? { sessionTimeout: data.sessionTimeout } : {}),
+      ...(data.sharedUsers !== undefined ? { sharedUsers: data.sharedUsers } : {}),
+      ...(data.statusAutorefresh !== undefined ? { statusAutorefresh: data.statusAutorefresh } : {}),
+      ...(data.transparentProxy !== undefined ? { transparentProxy: data.transparentProxy } : {}),
+    };
   }
 
   public async createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void> {

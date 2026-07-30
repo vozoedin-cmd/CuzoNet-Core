@@ -107,6 +107,93 @@ export interface RouterOsHotspotUserUpdateData {
   readonly server?: string;
 }
 
+export interface RouterOsHotspotUserProfileReference {
+  readonly id?: string;
+  readonly name?: string;
+}
+
+/**
+ * Un Hotspot User Profile de RouterOS (/ip/hotspot/user/profile).
+ *
+ * `on-login`/`on-logout` quedan FUERA del contrato a propósito: son scripts RouterOS
+ * multilínea (se observaron 5.7 KB / 132 líneas en un router real) que pueden contener
+ * credenciales embebidas, y el guard SENSITIVE_KEYS de ProvisioningRequest solo inspecciona
+ * claves, no valores — incluirlos persistiría secretos en inputSnapshotJson. Requieren una
+ * estrategia de secretos propia antes de gestionarse.
+ *
+ * `disabled` tampoco existe: a diferencia de los usuarios, los perfiles no se
+ * habilitan/deshabilitan.
+ */
+export interface RouterOsHotspotUserProfile {
+  readonly addMacCookie?: boolean;
+  readonly addressList?: string;
+  readonly addressPool?: string;
+  readonly id: string;
+  /** Flag `default` de RouterOS: el perfil base del hotspot, protegido contra borrado. */
+  readonly isDefault: boolean;
+  readonly idleTimeout?: string;
+  readonly keepaliveTimeout?: string;
+  readonly macCookieTimeout?: string;
+  readonly name: string;
+  readonly rateLimit?: string;
+  readonly sessionTimeout?: string;
+  readonly sharedUsers?: string;
+  readonly statusAutorefresh?: string;
+  readonly transparentProxy?: boolean;
+}
+
+export interface RouterOsHotspotUserProfileCreateData {
+  readonly addMacCookie?: boolean;
+  readonly addressList?: string;
+  readonly addressPool?: string;
+  readonly idleTimeout?: string;
+  readonly keepaliveTimeout?: string;
+  readonly macCookieTimeout?: string;
+  readonly name: string;
+  readonly rateLimit?: string;
+  readonly sessionTimeout?: string;
+  readonly sharedUsers?: string;
+  readonly statusAutorefresh?: string;
+  readonly transparentProxy?: boolean;
+}
+
+export interface RouterOsHotspotUserProfileUpdateData {
+  readonly addMacCookie?: boolean;
+  readonly addressList?: string;
+  readonly addressPool?: string;
+  readonly idleTimeout?: string;
+  readonly keepaliveTimeout?: string;
+  readonly macCookieTimeout?: string;
+  readonly name?: string;
+  readonly rateLimit?: string;
+  readonly sessionTimeout?: string;
+  readonly sharedUsers?: string;
+  readonly statusAutorefresh?: string;
+  readonly transparentProxy?: boolean;
+}
+
+/**
+ * Valores que RouterOS 7.21.4 asigna por defecto a un perfil recién creado. Verificados
+ * empíricamente creando un perfil con solo `name` y leyéndolo de vuelta.
+ *
+ * Son necesarios para la idempotencia: cuando un comando OMITE un campo, RouterOS no lo
+ * deja ausente sino que aplica estos valores. Comparar contra `undefined` produciría
+ * conflictos falsos en cada reintento.
+ *
+ * `sessionTimeout`, `addressPool` y `rateLimit` NO tienen default: solo aparecen si se
+ * configuran explícitamente.
+ */
+export const ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS = {
+  addMacCookie: true,
+  addressList: '',
+  idleTimeout: 'none',
+  keepaliveTimeout: '2m',
+  macCookieTimeout: '3d',
+  sharedUsers: '1',
+  statusAutorefresh: '1m',
+  transparentProxy: false,
+} as const;
+
 export interface RouterOsAddressListEntryReference {
   readonly address?: string;
   readonly id?: string;
@@ -365,6 +452,18 @@ export interface RouterOsClientPort {
   findHotspotUser(reference: RouterOsHotspotUserReference): Promise<RouterOsHotspotUser | null>;
   removeHotspotUser(reference: RouterOsHotspotUserReference): Promise<void>;
   updateHotspotUser(reference: RouterOsHotspotUserReference, data: RouterOsHotspotUserUpdateData): Promise<void>;
+
+  createHotspotUserProfile(profile: RouterOsHotspotUserProfileCreateData): Promise<void>;
+  findHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+  ): Promise<RouterOsHotspotUserProfile | null>;
+  /** Full listing, for the Synchronization Engine and for auditing profiles CuzoNet never provisioned. */
+  listHotspotUserProfiles(): Promise<RouterOsHotspotUserProfile[]>;
+  removeHotspotUserProfile(reference: RouterOsHotspotUserProfileReference): Promise<void>;
+  updateHotspotUserProfile(
+    reference: RouterOsHotspotUserProfileReference,
+    data: RouterOsHotspotUserProfileUpdateData,
+  ): Promise<void>;
 
   createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void>;
   disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void>;
