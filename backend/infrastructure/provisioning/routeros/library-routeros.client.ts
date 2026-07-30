@@ -54,9 +54,17 @@ function logRouterOsCommand(command: string, parameters?: Record<string, unknown
 }
 
 /**
- * RouterOS API binaria representa los booleanos como "yes"/"no" — nunca como "true"/"false"
- * (esa forma es exclusiva de la REST API). Un campo ausente o cualquier valor no afirmativo
- * se interpreta como `false`, preservando el comportamiento previo del proyecto.
+ * Normaliza un booleano de RouterOS. La representación depende de la versión y del
+ * transporte, así que se aceptan ambas formas conocidas:
+ *
+ * - "true"/"false": lo que devuelve RouterOS 7.21.4 sobre la API binaria a través de
+ *   `@sourceregistry/mikrotik-client`. Verificado end-to-end contra un hEX real durante
+ *   la certificación E2E de Hotspot User (p. ej. `/ip/hotspot/user/print` devuelve
+ *   `disabled=false` para un usuario habilitado).
+ * - "yes"/"no": forma clásica documentada por MikroTik y usada por versiones anteriores.
+ *
+ * Un campo ausente o cualquier otro valor se interpreta como `false`, preservando el
+ * comportamiento previo del proyecto.
  */
 function parseRouterOsBoolean(value: string | undefined): boolean {
   return value === 'yes' || value === 'true';
