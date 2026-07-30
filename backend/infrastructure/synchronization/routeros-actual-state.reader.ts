@@ -4,7 +4,7 @@ import type {
   RouterOsAddressListEntry,
   RouterOsClientFactoryPort,
   RouterOsClientPort,
-  RouterOsFilterRule,
+  ObservedFilterRule,
   RouterOsMangleRule,
   RouterOsNatRule,
   RouterOsSimpleQueue,
@@ -71,11 +71,14 @@ function normalizeAddressListEntry(entry: RouterOsAddressListEntry): NormalizedR
  * reference; unlike CuzoNet-managed rules, this identity is not guaranteed
  * stable across router exports/restores.
  */
-function ruleReferenceOrSynthetic(rule: { readonly id: string; readonly ruleReference?: string }): string {
+function ruleReferenceOrSynthetic(rule: { readonly id: string; readonly ruleReference?: string; readonly ownership?: { readonly status: string, readonly ruleReference?: string } }): string {
+  if (rule.ownership?.status === 'valid' && rule.ownership.ruleReference) {
+    return rule.ownership.ruleReference;
+  }
   return rule.ruleReference ?? `unmanaged:${rule.id}`;
 }
 
-function normalizeFilterRule(rule: RouterOsFilterRule): NormalizedResourceRecord {
+function normalizeFilterRule(rule: ObservedFilterRule): NormalizedResourceRecord {
   return {
     disabled: rule.disabled,
     fields: pickRuleFields(rule, RULE_FIELD_NAMES['filter-rule']),

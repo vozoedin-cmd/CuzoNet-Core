@@ -6,7 +6,7 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
-  RouterOsFilterRule,
+  ObservedFilterRule,
   RouterOsFilterRuleCreateData,
   RouterOsFilterRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
@@ -125,7 +125,8 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     const desired = this.buildDesiredFields(command);
     const comment = FilterRuleComment.create(ruleReference, command.comment);
 
-    const existing = await client.findFilterRule({ ruleReference: ruleReference.value });
+    const existingMatches = await client.findFilterRulesByReference(ruleReference.value);
+    const existing = existingMatches[0];
     if (existing) {
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
@@ -214,7 +215,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       return ruleReference.value; // Idempotent success: nothing changed
     }
 
-    await client.updateFilterRule({ id: existing.id }, updateData);
+    await client.updateFilterRule({ kind: 'id', id: existing.id }, updateData);
     return ruleReference.value;
   }
 
@@ -229,7 +230,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     }
 
     await client.moveFilterRule(
-      { id: existing.id },
+      { kind: 'id', id: existing.id },
       target.placeBeforeId !== undefined ? { placeBeforeId: target.placeBeforeId } : {},
     );
     return ruleReference.value;
@@ -240,7 +241,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
-    await client.enableFilterRule({ id: existing.id });
+    await client.enableFilterRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
@@ -249,21 +250,23 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
-    await client.disableFilterRule({ id: existing.id });
+    await client.disableFilterRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsFilterRuleRemoveInput): Promise<string> {
-    const existing = await client.findFilterRule({ ruleReference: command.ruleReference });
+    const existingMatches = await client.findFilterRulesByReference(command.ruleReference);
+    const existing = existingMatches[0];
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
-    await client.removeFilterRule({ id: existing.id });
+    await client.removeFilterRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
-  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<RouterOsFilterRule> {
-    const existing = await client.findFilterRule({ ruleReference });
+  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedFilterRule> {
+    const existingMatches = await client.findFilterRulesByReference(ruleReference);
+    const existing = existingMatches[0];
     if (!existing) {
       throw new RouterOsFilterRuleNotFoundError(`Regla no encontrada para la referencia: ${ruleReference}`);
     }
@@ -286,7 +289,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     };
   }
 
-  private isEquivalent(existing: RouterOsFilterRule, desired: DesiredFilterRuleFields): boolean {
+  private isEquivalent(existing: ObservedFilterRule, desired: DesiredFilterRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
       existing.action === desired.action &&

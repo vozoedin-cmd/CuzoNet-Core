@@ -34,9 +34,12 @@ describe('FakeRouterOsClient filter rules', () => {
     });
     const created = client.filterRules[0]!;
 
-    expect(await client.findFilterRule({ ruleReference: 'allow-lan' })).to.include({ id: created.id });
-    expect(await client.findFilterRule({ id: created.id })).to.include({ ruleReference: 'allow-lan' });
-    expect(await client.findFilterRule({ ruleReference: 'missing' })).to.equal(null);
+    expect((await client.findFilterRulesByReference('allow-lan'))[0]).to.include({ id: created.id });
+    const byId = await client.findFilterRuleById(created.id);
+    expect(byId).not.toBeNull();
+    expect(byId!.ownership).to.include({ status: 'valid', ruleReference: 'allow-lan' });
+    const missing = (await client.findFilterRulesByReference('missing'))[0];
+    expect(missing).toBeUndefined();
   });
 
   it('appends new rules at the end by default', async () => {
@@ -66,11 +69,11 @@ describe('FakeRouterOsClient filter rules', () => {
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r1' });
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r2' });
 
-    await client.disableFilterRule({ ruleReference: 'r1' });
+    await client.disableFilterRule({ kind: 'managed-reference', ruleReference: 'r1' });
     expect(client.filterRules.map((r) => r.disabled)).to.deep.equal([true, false]);
     expect(client.filterRules.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r2']);
 
-    await client.enableFilterRule({ ruleReference: 'r1' });
+    await client.enableFilterRule({ kind: 'managed-reference', ruleReference: 'r1' });
     expect(client.filterRules[0]?.disabled).to.equal(false);
   });
 
@@ -78,7 +81,7 @@ describe('FakeRouterOsClient filter rules', () => {
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r1' });
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r2' });
 
-    await client.updateFilterRule({ ruleReference: 'r1' }, { protocol: 'tcp' });
+    await client.updateFilterRule({ kind: 'managed-reference', ruleReference: 'r1' }, { protocol: 'tcp' });
 
     expect(client.filterRules[0]).to.include({ protocol: 'tcp', ruleReference: 'r1' });
     expect(client.filterRules.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r2']);
@@ -90,7 +93,7 @@ describe('FakeRouterOsClient filter rules', () => {
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r3' });
     const r1Id = client.filterRules[0]!.id;
 
-    await client.moveFilterRule({ ruleReference: 'r3' }, { placeBeforeId: r1Id });
+    await client.moveFilterRule({ kind: 'managed-reference', ruleReference: 'r3' }, { placeBeforeId: r1Id });
 
     expect(client.filterRules.map((r) => r.ruleReference)).to.deep.equal(['r3', 'r1', 'r2']);
   });
@@ -99,7 +102,7 @@ describe('FakeRouterOsClient filter rules', () => {
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r1' });
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r2' });
 
-    await client.moveFilterRule({ ruleReference: 'r1' }, {});
+    await client.moveFilterRule({ kind: 'managed-reference', ruleReference: 'r1' }, {});
 
     expect(client.filterRules.map((r) => r.ruleReference)).to.deep.equal(['r2', 'r1']);
   });
@@ -107,7 +110,7 @@ describe('FakeRouterOsClient filter rules', () => {
   it('removes a rule', async () => {
     await client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r1' });
 
-    await client.removeFilterRule({ ruleReference: 'r1' });
+    await client.removeFilterRule({ kind: 'managed-reference', ruleReference: 'r1' });
 
     expect(client.filterRules).to.have.length(0);
   });
@@ -117,11 +120,11 @@ describe('FakeRouterOsClient filter rules', () => {
     await client.createFilterRule({ action: 'accept', chain: 'forward', comment: 'cuzonet:firewall-filter:r2' });
 
     const listed = await client.listFilterRules();
-    expect(listed.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r2']);
+    expect(listed.map((r) => r.ownership.ruleReference)).to.deep.equal(['r1', 'r2']);
   });
 
   it('no-ops enable/disable/remove/update/move when the rule does not exist', async () => {
-    const missing = { ruleReference: 'missing' };
+    const missing = { kind: 'managed-reference' as const, ruleReference: 'missing' };
     await expect(client.disableFilterRule(missing)).resolves.toBeUndefined();
     await expect(client.enableFilterRule(missing)).resolves.toBeUndefined();
     await expect(client.removeFilterRule(missing)).resolves.toBeUndefined();
@@ -135,6 +138,6 @@ describe('FakeRouterOsClient filter rules', () => {
     await expect(
       client.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:r1' }),
     ).rejects.toThrow('Client is closed');
-    await expect(client.findFilterRule({ ruleReference: 'r1' })).rejects.toThrow('Client is closed');
+    await expect(client.findFilterRulesByReference('r1')).rejects.toThrow('Client is closed');
   });
 });

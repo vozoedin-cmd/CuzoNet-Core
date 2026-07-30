@@ -24,10 +24,10 @@ import type {
   RouterOsAddressListEntryCreateData,
   RouterOsAddressListEntryReference,
   RouterOsAddressListEntryUpdateData,
-  RouterOsFilterRule,
+  ObservedFilterRule,
+  RouterOsFilterRuleLocator,
   RouterOsFilterRuleCreateData,
   RouterOsFilterRuleMoveTarget,
-  RouterOsFilterRuleReference,
   RouterOsFilterRuleUpdateData,
   RouterOsNatRule,
   RouterOsNatRuleCreateData,
@@ -608,7 +608,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     const attributes: Record<string, string> = {
       action: rule.action,
       chain: rule.chain,
-      comment: rule.comment,
+      ...(rule.comment !== undefined ? { comment: rule.comment } : {}),
     };
     if (rule.protocol !== undefined) attributes.protocol = rule.protocol;
     if (rule.srcAddress !== undefined) attributes['src-address'] = rule.srcAddress;
@@ -627,8 +627,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async disableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
-    const rule = await this.findFilterRule(reference);
+  public async disableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
+    const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/filter/disable', {
@@ -637,8 +637,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async enableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
-    const rule = await this.findFilterRule(reference);
+  public async enableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
+    const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/filter/enable', {
@@ -647,38 +647,42 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async findFilterRule(reference: RouterOsFilterRuleReference): Promise<RouterOsFilterRule | null> {
-    if (reference.id === undefined && reference.ruleReference === undefined) {
-      return null;
-    }
-
-    if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/filter', {
-        attributes: { '.proplist': FILTER_RULE_PROPLIST },
-        queries: [`?.id=${reference.id}`],
-        timeoutMs: this.timeoutMs,
-      });
-      const reply = replies[0];
-      return reply ? mapReplyToFilterRule(reply) : null;
-    }
-
-    const rules = await this.listFilterRules();
-    return rules.find((rule) => rule.ruleReference === reference.ruleReference) ?? null;
+  public async findFilterRuleById(id: string): Promise<ObservedFilterRule | null> {
+    const replies = await this.client.print('/ip/firewall/filter', {
+      attributes: { '.proplist': FILTER_RULE_PROPLIST },
+      queries: [`?.id=${id}`],
+      timeoutMs: this.timeoutMs,
+    });
+    const reply = replies[0];
+    return reply ? mapReplyToFilterRule(reply, 0) : null;
   }
 
-  public async listFilterRules(): Promise<RouterOsFilterRule[]> {
+  public async findFilterRulesByReference(ruleReference: string): Promise<ObservedFilterRule[]> {
+    const rules = await this.listFilterRules();
+    return rules.filter((rule) => rule.ownership.ruleReference === ruleReference);
+  }
+
+  public async listFilterRules(): Promise<ObservedFilterRule[]> {
     const replies = await this.client.print('/ip/firewall/filter', {
       attributes: { '.proplist': FILTER_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
-    return replies.map(mapReplyToFilterRule);
+    return replies.map((reply, i) => mapReplyToFilterRule(reply, i));
+  }
+
+  private async resolveFilterRule(locator: RouterOsFilterRuleLocator): Promise<ObservedFilterRule | null> {
+    if (locator.kind === 'id') {
+      return this.findFilterRuleById(locator.id);
+    }
+    const matches = await this.findFilterRulesByReference(locator.ruleReference);
+    return matches[0] ?? null;
   }
 
   public async moveFilterRule(
-    reference: RouterOsFilterRuleReference,
+    locator: RouterOsFilterRuleLocator,
     target: RouterOsFilterRuleMoveTarget,
   ): Promise<void> {
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
     let destination = target.placeBeforeId;
@@ -693,8 +697,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
-    const rule = await this.findFilterRule(reference);
+  public async removeFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
+    const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/filter/remove', {
@@ -704,10 +708,10 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async updateFilterRule(
-    reference: RouterOsFilterRuleReference,
+    locator: RouterOsFilterRuleLocator,
     data: RouterOsFilterRuleUpdateData,
   ): Promise<void> {
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
     const attributes: Record<string, string> = { numbers: rule.id };
@@ -1115,27 +1119,39 @@ function mapReplyToAddressListEntry(reply: RouterOSRecord): RouterOsAddressListE
   };
 }
 
-const FILTER_RULE_PROPLIST =
-  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,disabled,comment';
 
-function mapReplyToFilterRule(reply: RouterOSRecord): RouterOsFilterRule {
-  const comment = reply.comment ?? '';
-  const ruleReference = FilterRuleComment.extractReference(comment);
+
+const FILTER_RULE_PROPLIST =
+  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,disabled,comment,dynamic,invalid,jump-target,reject-with,hotspot,log,log-prefix,address-list,bytes,packets';
+
+function mapReplyToFilterRule(reply: RouterOSRecord, index: number): ObservedFilterRule {
+  const comment = reply.comment;
   return {
-    action: reply.action ?? '',
-    chain: reply.chain ?? '',
-    comment,
-    ...(reply['connection-state'] ? { connectionState: reply['connection-state'] } : {}),
-    disabled: reply.disabled === 'true',
-    ...(reply['dst-address'] ? { dstAddress: reply['dst-address'] } : {}),
-    ...(reply['dst-port'] ? { dstPort: reply['dst-port'] } : {}),
     id: reply['.id'] ?? '',
-    ...(reply['in-interface'] ? { inInterface: reply['in-interface'] } : {}),
-    ...(reply['out-interface'] ? { outInterface: reply['out-interface'] } : {}),
-    ...(reply.protocol ? { protocol: reply.protocol } : {}),
-    ...(ruleReference !== null ? { ruleReference } : {}),
-    ...(reply['src-address'] ? { srcAddress: reply['src-address'] } : {}),
-    ...(reply['src-port'] ? { srcPort: reply['src-port'] } : {}),
+    physicalIndex: index,
+    dynamic: parseRouterOsBoolean(reply.dynamic),
+    invalid: parseRouterOsBoolean(reply.invalid),
+    chain: reply.chain ?? '',
+    action: reply.action ?? '',
+    ...(comment !== undefined ? { comment } : {}),
+    ownership: FilterRuleComment.parseOwnership(comment),
+    disabled: parseRouterOsBoolean(reply.disabled),
+    ...(reply['jump-target'] !== undefined ? { jumpTarget: reply['jump-target'] } : {}),
+    ...(reply['reject-with'] !== undefined ? { rejectWith: reply['reject-with'] } : {}),
+    ...(reply.hotspot !== undefined ? { hotspot: reply.hotspot } : {}),
+    log: parseRouterOsBoolean(reply.log),
+    ...(reply['log-prefix'] !== undefined ? { logPrefix: reply['log-prefix'] } : {}),
+    ...(reply['address-list'] !== undefined ? { addressList: reply['address-list'] } : {}),
+    ...(reply.protocol !== undefined ? { protocol: reply.protocol } : {}),
+    ...(reply['src-port'] !== undefined ? { srcPort: reply['src-port'] } : {}),
+    ...(reply['dst-port'] !== undefined ? { dstPort: reply['dst-port'] } : {}),
+    ...(reply['in-interface'] !== undefined ? { inInterface: reply['in-interface'] } : {}),
+    ...(reply['out-interface'] !== undefined ? { outInterface: reply['out-interface'] } : {}),
+    ...(reply['connection-state'] !== undefined ? { connectionState: reply['connection-state'] } : {}),
+    ...(reply['src-address'] !== undefined ? { srcAddress: reply['src-address'] } : {}),
+    ...(reply['dst-address'] !== undefined ? { dstAddress: reply['dst-address'] } : {}),
+    bytes: reply.bytes ? parseInt(reply.bytes, 10) || 0 : 0,
+    packets: reply.packets ? parseInt(reply.packets, 10) || 0 : 0,
   };
 }
 

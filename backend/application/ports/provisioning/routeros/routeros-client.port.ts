@@ -238,59 +238,81 @@ export interface RouterOsAddressListEntryUpdateData {
   readonly disabled?: boolean;
 }
 
-export interface RouterOsFilterRuleReference {
-  readonly id?: string;
+export type RouterOsFilterRuleOwnershipStatus = 'valid' | 'legacy' | 'malformed' | 'foreign' | 'unmanaged';
+
+export interface RouterOsFilterRuleOwnership {
+  readonly status: RouterOsFilterRuleOwnershipStatus;
   readonly ruleReference?: string;
+  readonly userComment?: string;
 }
 
-export interface RouterOsFilterRule {
-  readonly action: string;
-  readonly chain: string;
-  readonly comment?: string;
-  readonly connectionState?: string;
-  readonly disabled: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
+export interface ObservedFilterRule {
   readonly id: string;
-  readonly inInterface?: string;
-  readonly outInterface?: string;
-  readonly protocol?: string;
-  readonly ruleReference?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-}
-
-export interface RouterOsFilterRuleCreateData {
-  readonly action: string;
+  readonly physicalIndex: number;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
   readonly chain: string;
-  readonly comment: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
+  readonly action: string;
+  readonly comment?: string;
+  readonly ownership: RouterOsFilterRuleOwnership;
+  readonly disabled: boolean;
+  readonly jumpTarget?: string;
+  readonly rejectWith?: string;
+  readonly hotspot?: string;
+  readonly log: boolean;
+  readonly logPrefix?: string;
+  readonly addressList?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
   readonly dstAddress?: string;
+  readonly srcPort?: string;
   readonly dstPort?: string;
   readonly inInterface?: string;
   readonly outInterface?: string;
+  readonly connectionState?: string;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
+export interface ManagedFilterRuleSpec {
+  readonly chain: string;
+  readonly action: string;
+  readonly comment: string;
+  readonly disabled?: boolean;
+  readonly jumpTarget?: string;
+  readonly rejectWith?: string;
+  readonly hotspot?: string;
+  readonly log?: boolean;
+  readonly logPrefix?: string;
+  readonly addressList?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly connectionState?: string;
+}
+
+export interface RouterOsFilterRuleIdLocator {
+  readonly kind: 'id';
+  readonly id: string;
+}
+
+export interface RouterOsFilterRuleReferenceLocator {
+  readonly kind: 'managed-reference';
+  readonly ruleReference: string;
+}
+
+export type RouterOsFilterRuleLocator = RouterOsFilterRuleIdLocator | RouterOsFilterRuleReferenceLocator;
+
+export interface RouterOsFilterRuleCreateData extends ManagedFilterRuleSpec {
   /** .id of the existing rule this one should be inserted before; omit to append at the end. */
   readonly placeBeforeId?: string;
-  readonly protocol?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
 }
 
-export interface RouterOsFilterRuleUpdateData {
-  readonly action?: string;
-  readonly chain?: string;
-  readonly comment?: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly inInterface?: string;
-  readonly outInterface?: string;
-  readonly protocol?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-}
+export type RouterOsFilterRuleUpdateData = Partial<ManagedFilterRuleSpec>;
 
 export interface RouterOsFilterRuleMoveTarget {
   /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
@@ -502,14 +524,15 @@ export interface RouterOsClientPort {
   ): Promise<void>;
 
   createFilterRule(rule: RouterOsFilterRuleCreateData): Promise<void>;
-  disableFilterRule(reference: RouterOsFilterRuleReference): Promise<void>;
-  enableFilterRule(reference: RouterOsFilterRuleReference): Promise<void>;
-  findFilterRule(reference: RouterOsFilterRuleReference): Promise<RouterOsFilterRule | null>;
+  disableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void>;
+  enableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void>;
+  findFilterRuleById(id: string): Promise<ObservedFilterRule | null>;
+  findFilterRulesByReference(ruleReference: string): Promise<ObservedFilterRule[]>;
   /** Global, physically-ordered listing of all filter rules (across every chain), used to resolve position/move targets. */
-  listFilterRules(): Promise<RouterOsFilterRule[]>;
-  moveFilterRule(reference: RouterOsFilterRuleReference, target: RouterOsFilterRuleMoveTarget): Promise<void>;
-  removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void>;
-  updateFilterRule(reference: RouterOsFilterRuleReference, data: RouterOsFilterRuleUpdateData): Promise<void>;
+  listFilterRules(): Promise<ObservedFilterRule[]>;
+  moveFilterRule(locator: RouterOsFilterRuleLocator, target: RouterOsFilterRuleMoveTarget): Promise<void>;
+  removeFilterRule(locator: RouterOsFilterRuleLocator): Promise<void>;
+  updateFilterRule(locator: RouterOsFilterRuleLocator, data: RouterOsFilterRuleUpdateData): Promise<void>;
 
   createNatRule(rule: RouterOsNatRuleCreateData): Promise<void>;
   disableNatRule(reference: RouterOsNatRuleReference): Promise<void>;

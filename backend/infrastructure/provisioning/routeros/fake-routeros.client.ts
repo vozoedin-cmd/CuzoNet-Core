@@ -20,10 +20,10 @@ import type {
   RouterOsAddressListEntryCreateData,
   RouterOsAddressListEntryReference,
   RouterOsAddressListEntryUpdateData,
-  RouterOsFilterRule,
+  ObservedFilterRule,
+  RouterOsFilterRuleLocator,
   RouterOsFilterRuleCreateData,
   RouterOsFilterRuleMoveTarget,
-  RouterOsFilterRuleReference,
   RouterOsFilterRuleUpdateData,
   RouterOsNatRule,
   RouterOsNatRuleCreateData,
@@ -41,6 +41,33 @@ import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-o
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 
+export interface FakeRouterOsFilterRule {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly connectionState?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly ruleReference?: string;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly jumpTarget?: string;
+  readonly rejectWith?: string;
+  readonly hotspot?: string;
+  readonly log: boolean;
+  readonly logPrefix?: string;
+  readonly addressList?: string;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
   public queues: RouterOsSimpleQueue[] = [];
@@ -48,7 +75,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public hotspotUsers: RouterOsHotspotUser[] = [];
   public hotspotUserProfiles: RouterOsHotspotUserProfile[] = [];
   public addressListEntries: RouterOsAddressListEntry[] = [];
-  public filterRules: RouterOsFilterRule[] = [];
+  public filterRules: FakeRouterOsFilterRule[] = [];
   public natRules: RouterOsNatRule[] = [];
   public mangleRules: RouterOsMangleRule[] = [];
   private nextId = 1;
@@ -576,7 +603,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const ruleData: RouterOsFilterRule = {
+    const ruleData: FakeRouterOsFilterRule = {
       action: rule.action,
       chain: rule.chain,
       comment: rule.comment,
@@ -593,15 +620,25 @@ export class FakeRouterOsClient implements RouterOsClientPort {
         : {}),
       ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
       ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+      ...(rule.jumpTarget !== undefined ? { jumpTarget: rule.jumpTarget } : {}),
+      ...(rule.rejectWith !== undefined ? { rejectWith: rule.rejectWith } : {}),
+      ...(rule.hotspot !== undefined ? { hotspot: rule.hotspot } : {}),
+      ...(rule.logPrefix !== undefined ? { logPrefix: rule.logPrefix } : {}),
+      ...(rule.addressList !== undefined ? { addressList: rule.addressList } : {}),
+      log: rule.log ?? false,
+      dynamic: false,
+      invalid: false,
+      bytes: 0,
+      packets: 0,
     };
     this.insertRuleAt(this.filterRules, ruleData, rule.placeBeforeId);
   }
 
-  public async disableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+  public async disableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFakeFilterRule(locator);
     if (!rule) {
       return;
     }
@@ -609,11 +646,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.filterRules[index] = { ...rule, disabled: true };
   }
 
-  public async enableFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+  public async enableFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFakeFilterRule(locator);
     if (!rule) {
       return;
     }
@@ -621,35 +658,83 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.filterRules[index] = { ...rule, disabled: false };
   }
 
-  public async findFilterRule(reference: RouterOsFilterRuleReference): Promise<RouterOsFilterRule | null> {
+  public async findFilterRuleById(id: string): Promise<ObservedFilterRule | null> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = this.filterRules.find(
-      (r) =>
-        (reference.id !== undefined && r.id === reference.id) ||
-        (reference.id === undefined &&
-          reference.ruleReference !== undefined &&
-          r.ruleReference === reference.ruleReference),
-    );
-    return rule ?? null;
+    const index = this.filterRules.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return null;
+    }
+    const rule = this.filterRules[index];
+    if (!rule) return null;
+    return this.mapFakeToObservedFilterRule(rule, index);
   }
 
-  public async listFilterRules(): Promise<RouterOsFilterRule[]> {
+  public async findFilterRulesByReference(ruleReference: string): Promise<ObservedFilterRule[]> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    return [...this.filterRules];
+    const matches: ObservedFilterRule[] = [];
+    this.filterRules.forEach((r, index) => {
+      if (r.ruleReference === ruleReference) {
+        matches.push(this.mapFakeToObservedFilterRule(r, index));
+      }
+    });
+    return matches;
+  }
+
+  private async resolveFakeFilterRule(locator: RouterOsFilterRuleLocator): Promise<FakeRouterOsFilterRule | null> {
+    if (locator.kind === 'id') {
+      return this.filterRules.find((r) => r.id === locator.id) ?? null;
+    }
+    const matches = this.filterRules.filter((r) => r.ruleReference === locator.ruleReference);
+    return matches[0] ?? null; // Si hay múltiples, operamos sobre el primero (o fallamos en el adapter, pero aquí resolvemos uno para compatibilidad con mutaciones previas)
+  }
+
+  private mapFakeToObservedFilterRule(r: FakeRouterOsFilterRule, index: number): ObservedFilterRule {
+    return {
+      id: r.id,
+      physicalIndex: index,
+      dynamic: r.dynamic,
+      invalid: r.invalid,
+      chain: r.chain,
+      action: r.action,
+      ...(r.comment !== undefined ? { comment: r.comment } : {}),
+      ownership: FilterRuleComment.parseOwnership(r.comment),
+      disabled: r.disabled,
+      ...(r.jumpTarget !== undefined ? { jumpTarget: r.jumpTarget } : {}),
+      ...(r.rejectWith !== undefined ? { rejectWith: r.rejectWith } : {}),
+      ...(r.hotspot !== undefined ? { hotspot: r.hotspot } : {}),
+      log: r.log,
+      ...(r.logPrefix !== undefined ? { logPrefix: r.logPrefix } : {}),
+      ...(r.addressList !== undefined ? { addressList: r.addressList } : {}),
+      ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+      ...(r.srcPort !== undefined ? { srcPort: r.srcPort } : {}),
+      ...(r.dstPort !== undefined ? { dstPort: r.dstPort } : {}),
+      ...(r.inInterface !== undefined ? { inInterface: r.inInterface } : {}),
+      ...(r.outInterface !== undefined ? { outInterface: r.outInterface } : {}),
+      ...(r.connectionState !== undefined ? { connectionState: r.connectionState } : {}),
+      bytes: r.bytes,
+      packets: r.packets,
+    };
+  }
+
+  public async listFilterRules(): Promise<ObservedFilterRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return this.filterRules.map((r, i) => this.mapFakeToObservedFilterRule(r, i));
   }
 
   public async moveFilterRule(
-    reference: RouterOsFilterRuleReference,
+    locator: RouterOsFilterRuleLocator,
     target: RouterOsFilterRuleMoveTarget,
   ): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFakeFilterRule(locator);
     if (!rule) {
       return;
     }
@@ -657,11 +742,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.insertRuleAt(this.filterRules, rule, target.placeBeforeId);
   }
 
-  public async removeFilterRule(reference: RouterOsFilterRuleReference): Promise<void> {
+  public async removeFilterRule(locator: RouterOsFilterRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFakeFilterRule(locator);
     if (!rule) {
       return;
     }
@@ -669,18 +754,18 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   }
 
   public async updateFilterRule(
-    reference: RouterOsFilterRuleReference,
+    locator: RouterOsFilterRuleLocator,
     data: RouterOsFilterRuleUpdateData,
   ): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findFilterRule(reference);
+    const rule = await this.resolveFakeFilterRule(locator);
     if (!rule) {
       return;
     }
     const index = this.filterRules.findIndex((r) => r.id === rule.id);
-    const ruleData: RouterOsFilterRule = {
+    const ruleData: FakeRouterOsFilterRule = {
       ...rule,
       ...(data.action !== undefined ? { action: data.action } : {}),
       ...(data.chain !== undefined ? { chain: data.chain } : {}),
@@ -701,6 +786,12 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
       ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
       ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
+      ...(data.jumpTarget !== undefined ? { jumpTarget: data.jumpTarget } : {}),
+      ...(data.rejectWith !== undefined ? { rejectWith: data.rejectWith } : {}),
+      ...(data.hotspot !== undefined ? { hotspot: data.hotspot } : {}),
+      ...(data.logPrefix !== undefined ? { logPrefix: data.logPrefix } : {}),
+      ...(data.addressList !== undefined ? { addressList: data.addressList } : {}),
+      ...(data.log !== undefined ? { log: data.log } : {}),
     };
     this.filterRules[index] = ruleData;
   }
