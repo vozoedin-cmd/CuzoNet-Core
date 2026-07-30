@@ -86,19 +86,20 @@ function applyAddressListAction(
   payload: Record<string, unknown>,
 ): MutableDesiredRecord | null {
   switch (operation) {
+    // `timeout` quedó fuera del contrato: una entrada con timeout es dinámica y efímera,
+    // y el estado real ya no lo expone. Mantenerlo aquí dejaría todo el recurso en
+    // `drifted` permanente, porque el deseado tendría un campo que el actual nunca trae.
     case 'add':
       return {
         disabled: payloadDisabled(payload, false),
         fields: {
           comment: payload.comment !== undefined ? String(payload.comment) : '',
-          timeout: payload.timeout !== undefined ? String(payload.timeout) : '',
         },
       };
     case 'update': {
       if (current === null) return null;
       const fields = { ...current.fields };
       if (payload.comment !== undefined) fields.comment = String(payload.comment);
-      if (payload.timeout !== undefined) fields.timeout = String(payload.timeout);
       return { disabled: payloadDisabled(payload, current.disabled), fields };
     }
     case 'enable':

@@ -17,6 +17,71 @@ describe('FakeRouterOsClient address list entries', () => {
     expect(client.addressListEntries[0]?.id).to.match(/^\*\d+$/);
   });
 
+  it('creates a static entry: nothing CuzoNet can send makes it dynamic', async () => {
+    await client.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
+
+    expect(client.addressListEntries[0]?.dynamic).to.equal(false);
+  });
+
+  it('omits comment entirely when none is given, like RouterOS does', async () => {
+    await client.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
+
+    expect(client.addressListEntries[0]).not.to.have.property('comment');
+  });
+
+  /**
+   * Comportamientos verificados contra un hEX con RouterOS 7.21.4. El doble los replica
+   * porque son justo los que ninguna prueba podia alcanzar antes: el fake aceptaba
+   * duplicados y deshabilitaba entradas dinamicas, cosas que el router real rechaza.
+   */
+  describe('real RouterOS behaviour', () => {
+    it('rejects a duplicate list+address on add', async () => {
+      await client.createAddressListEntry({ address: '192.168.1.10', comment: 'primera', list: 'blocked-ips' });
+
+      await expect(
+        client.createAddressListEntry({ address: '192.168.1.10', comment: 'segunda', list: 'blocked-ips' }),
+      ).rejects.toThrow('already have such entry');
+
+      // Ni actualiza la existente ni crea una segunda.
+      expect(client.addressListEntries).to.have.length(1);
+      expect(client.addressListEntries[0]?.comment).to.equal('primera');
+    });
+
+    it('refuses to disable a dynamic entry', async () => {
+      client.addressListEntries.push({
+        address: '192.168.1.198',
+        disabled: false,
+        dynamic: true,
+        id: '*10',
+        list: 'blocked-ips',
+      });
+
+      await expect(client.disableAddressListEntry({ id: '*10' })).rejects.toThrow(
+        'cannot have disabled dynamic entry',
+      );
+      await expect(client.updateAddressListEntry({ id: '*10' }, { disabled: true })).rejects.toThrow(
+        'cannot have disabled dynamic entry',
+      );
+      expect(client.addressListEntries[0]?.disabled).to.equal(false);
+    });
+
+    it('accepts set and remove on a dynamic entry, as the router does', async () => {
+      client.addressListEntries.push({
+        address: '192.168.1.198',
+        disabled: false,
+        dynamic: true,
+        id: '*10',
+        list: 'blocked-ips',
+      });
+
+      await client.updateAddressListEntry({ id: '*10' }, { comment: 'tocada' });
+      expect(client.addressListEntries[0]?.comment).to.equal('tocada');
+
+      await client.removeAddressListEntry({ id: '*10' });
+      expect(client.addressListEntries).to.have.length(0);
+    });
+  });
+
   it('finds an entry by list+address and by id', async () => {
     await client.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
     const created = client.addressListEntries[0]!;

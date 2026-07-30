@@ -80,7 +80,8 @@ describe('RouterOsFirewallAddressListProvisioningAdapter', () => {
       expect(result.outcome).to.equal('success');
       expect(createSpy).toHaveBeenCalledTimes(1);
       expect(createSpy.mock.calls[0]?.[0]).not.to.have.property('timeout');
-      expect(fakeClient.addressListEntries[0]?.timeout).to.equal(undefined);
+      // Sin timeout, RouterOS deja la entrada estática: es lo que el Sync puede administrar.
+      expect(fakeClient.addressListEntries[0]?.dynamic).to.equal(false);
     });
 
     it('rejects a payload carrying timeout instead of silently dropping it', async () => {

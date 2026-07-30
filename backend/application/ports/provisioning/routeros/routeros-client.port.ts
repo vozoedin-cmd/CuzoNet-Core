@@ -200,13 +200,30 @@ export interface RouterOsAddressListEntryReference {
   readonly list?: string;
 }
 
+/**
+ * Entrada de `/ip/firewall/address-list` en RouterOS 7.21.4.
+ *
+ * `creationTime` y `dynamic` son de SOLO LECTURA: los asigna el router, así que no
+ * aparecen en los datos de creación ni de actualización.
+ *
+ * `timeout` no se modela a propósito. Fijarlo convierte la entrada en `dynamic=true` y
+ * `/print` devuelve una cuenta regresiva en lugar del valor enviado, de modo que no es un
+ * campo de configuración comparable. `dynamic` es lo que permite reconocer esas entradas.
+ */
 export interface RouterOsAddressListEntry {
   readonly address: string;
   readonly comment?: string;
+  /** Marca de tiempo asignada por el router, p. ej. "2023-10-10 07:22:26". Solo lectura. */
+  readonly creationTime?: string;
   readonly disabled: boolean;
+  /**
+   * `true` cuando la entrada la gobierna RouterOS: la genera una regla
+   * `add-src-to-address-list`, la resolución de un nombre de dominio o un `timeout`.
+   * No se guarda en la configuración y RouterOS rechaza deshabilitarla. Solo lectura.
+   */
+  readonly dynamic: boolean;
   readonly id: string;
   readonly list: string;
-  readonly timeout?: string;
 }
 
 export interface RouterOsAddressListEntryCreateData {
@@ -214,13 +231,11 @@ export interface RouterOsAddressListEntryCreateData {
   readonly comment?: string;
   readonly disabled?: boolean;
   readonly list: string;
-  readonly timeout?: string;
 }
 
 export interface RouterOsAddressListEntryUpdateData {
   readonly comment?: string;
   readonly disabled?: boolean;
-  readonly timeout?: string;
 }
 
 export interface RouterOsFilterRuleReference {

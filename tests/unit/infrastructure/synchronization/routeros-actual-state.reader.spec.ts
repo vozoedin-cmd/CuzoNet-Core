@@ -45,8 +45,10 @@ describe('RouterOsActualStateReader', () => {
 
     const records = await reader.readActualState('company-1', 'router-1', 'address-list-entry');
 
+    // `timeout` quedó fuera del contrato: identifica entradas dinámicas y efímeras, y el
+    // router lo devuelve como cuenta regresiva, así que nunca fue comparable.
     expect(records).to.deep.equal([
-      { disabled: false, fields: { comment: 'moroso', timeout: '' }, reference: 'blocked-ips:192.168.1.10' },
+      { disabled: false, fields: { comment: 'moroso' }, reference: 'blocked-ips:192.168.1.10' },
     ]);
   });
 

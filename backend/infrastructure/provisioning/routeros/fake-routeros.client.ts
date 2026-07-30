@@ -435,21 +435,36 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     };
   }
 
+  /**
+   * RouterOS 7.21.4 impone unicidad sobre `list`+`address` en `/add` y responde
+   * `already have such entry`. Verificado en el laboratorio: el segundo `/add` no
+   * actualiza la entrada existente ni crea una segunda, falla.
+   */
   public async createAddressListEntry(entry: RouterOsAddressListEntryCreateData): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
+    }
+    const duplicate = this.addressListEntries.some(
+      (e) => e.list === entry.list && e.address === entry.address,
+    );
+    if (duplicate) {
+      throw new Error('failure: already have such entry');
     }
     const entryData: RouterOsAddressListEntry = {
       address: entry.address,
       ...(entry.comment !== undefined ? { comment: entry.comment } : {}),
       disabled: entry.disabled ?? false,
+      dynamic: false,
       id: `*${this.nextId++}`,
       list: entry.list,
-      ...(entry.timeout !== undefined ? { timeout: entry.timeout } : {}),
     };
     this.addressListEntries.push(entryData);
   }
 
+  /**
+   * RouterOS rechaza deshabilitar una entrada dinámica: `cannot have disabled dynamic
+   * entry`. `/set` y `/remove` sí se aceptan sobre ellas.
+   */
   public async disableAddressListEntry(reference: RouterOsAddressListEntryReference): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
@@ -457,6 +472,9 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     const entry = await this.findAddressListEntry(reference);
     if (!entry) {
       return;
+    }
+    if (entry.dynamic) {
+      throw new Error('failure: cannot have disabled dynamic entry');
     }
     const index = this.addressListEntries.findIndex((e) => e.id === entry.id);
     this.addressListEntries[index] = { ...entry, disabled: true };
@@ -521,12 +539,14 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (!entry) {
       return;
     }
+    if (entry.dynamic && data.disabled === true) {
+      throw new Error('failure: cannot have disabled dynamic entry');
+    }
     const index = this.addressListEntries.findIndex((e) => e.id === entry.id);
     const entryData: RouterOsAddressListEntry = {
       ...entry,
       ...(data.comment !== undefined ? { comment: data.comment } : {}),
       ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
-      ...(data.timeout !== undefined ? { timeout: data.timeout } : {}),
     };
     this.addressListEntries[index] = entryData;
   }

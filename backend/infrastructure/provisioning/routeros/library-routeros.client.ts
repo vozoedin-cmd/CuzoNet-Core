@@ -500,7 +500,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       list: entry.list,
     };
     if (entry.comment !== undefined) attributes.comment = entry.comment;
-    if (entry.timeout !== undefined) attributes.timeout = entry.timeout;
     if (entry.disabled !== undefined) attributes.disabled = entry.disabled ? 'yes' : 'no';
 
     await this.client.execute('/ip/firewall/address-list/add', {
@@ -542,9 +541,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     }
 
     const replies = await this.client.print('/ip/firewall/address-list', {
-      attributes: {
-        '.proplist': '.id,list,address,disabled,comment,timeout',
-      },
+      attributes: { '.proplist': ADDRESS_LIST_PROPLIST },
       queries,
       timeoutMs: this.timeoutMs,
     });
@@ -559,9 +556,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 
   public async listAddressListEntries(): Promise<RouterOsAddressListEntry[]> {
     const replies = await this.client.print('/ip/firewall/address-list', {
-      attributes: {
-        '.proplist': '.id,list,address,disabled,comment,timeout',
-      },
+      attributes: { '.proplist': ADDRESS_LIST_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
     return replies.map(mapReplyToAddressListEntry);
@@ -586,7 +581,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 
     const attributes: Record<string, string> = { numbers: entry.id };
     if (data.comment !== undefined) attributes.comment = data.comment;
-    if (data.timeout !== undefined) attributes.timeout = data.timeout;
     if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
 
     if (Object.keys(attributes).length === 1) return;
@@ -1070,14 +1064,26 @@ function mapReplyToHotspotUserProfile(reply: RouterOSRecord): RouterOsHotspotUse
   };
 }
 
+/**
+ * `.proplist` de address-list. Incluye `creation-time` y `dynamic`, ambos de solo lectura
+ * y confirmados en RouterOS 7.21.4; excluye `timeout`, que no forma parte del contrato.
+ */
+const ADDRESS_LIST_PROPLIST = '.id,list,address,disabled,comment,creation-time,dynamic';
+
+/**
+ * RouterOS omite por completo las claves sin valor: una entrada sin comentario no llega
+ * como `comment=""`, llega sin la clave. Se conserva esa distinción como `undefined` en
+ * lugar de aplanarla a cadena vacía, para que el doble de pruebas pueda replicarla.
+ */
 function mapReplyToAddressListEntry(reply: RouterOSRecord): RouterOsAddressListEntry {
   return {
     address: reply.address ?? '',
-    comment: reply.comment ?? '',
-    disabled: reply.disabled === 'true',
+    ...(reply.comment !== undefined ? { comment: reply.comment } : {}),
+    ...(reply['creation-time'] !== undefined ? { creationTime: reply['creation-time'] } : {}),
+    disabled: parseRouterOsBoolean(reply.disabled),
+    dynamic: parseRouterOsBoolean(reply.dynamic),
     id: reply['.id'] ?? '',
     list: reply.list ?? '',
-    timeout: reply.timeout ?? '',
   };
 }
 

@@ -38,7 +38,7 @@ function normalizeSimpleQueue(queue: RouterOsSimpleQueue): NormalizedResourceRec
 function normalizeAddressListEntry(entry: RouterOsAddressListEntry): NormalizedResourceRecord {
   return {
     disabled: entry.disabled,
-    fields: { comment: entry.comment ?? '', timeout: entry.timeout ?? '' },
+    fields: { comment: entry.comment ?? '' },
     reference: `${entry.list}:${entry.address}`,
   };
 }

@@ -179,8 +179,10 @@ describe('ProvisioningHistoryDesiredStateRepository', () => {
 
     const desired = await repository.getDesiredState('company-1', 'router-1', 'address-list-entry');
 
+    // El estado deseado debe reflejar exactamente los campos que el estado real expone;
+    // conservar `timeout` aquí dejaría el recurso en `drifted` permanente.
     expect(desired).to.deep.equal([
-      { disabled: false, fields: { comment: 'moroso', timeout: '' }, reference: 'blocked-ips:192.168.1.10' },
+      { disabled: false, fields: { comment: 'moroso' }, reference: 'blocked-ips:192.168.1.10' },
     ]);
   });
 
