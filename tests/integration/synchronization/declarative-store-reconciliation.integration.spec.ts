@@ -33,7 +33,12 @@ describe('Declarative desired-state store driving the Synchronization Engine end
     database = new SqliteDatabase({ busyTimeoutMs: 2_500, path: ':memory:' });
     new MigrationRunner(database.connection).migrate();
     const desiredResourceStateRepo = new SqliteDesiredResourceStateRepository(database.session);
-    setState = new SetDesiredResourceState(desiredResourceStateRepo, companyContext, clock, idGenerator);
+    setState = new SetDesiredResourceState(
+      desiredResourceStateRepo,
+      companyContext,
+      clock,
+      idGenerator,
+    );
     removeState = new RemoveDesiredResourceState(desiredResourceStateRepo, companyContext, clock);
 
     fakeClient = new FakeRouterOsClient();
@@ -75,9 +80,15 @@ describe('Declarative desired-state store driving the Synchronization Engine end
       routerId: 'router-1',
     });
 
-    const beforeProvisioning = await generatePlan.execute({ resourceTypes: ['filter-rule'], routerId: 'router-1' });
+    const beforeProvisioning = await generatePlan.execute({
+      resourceTypes: ['filter-rule'],
+      routerId: 'router-1',
+    });
     expect(beforeProvisioning.items).to.have.length(1);
-    expect(beforeProvisioning.items[0]).to.include({ reference: 'block-ssh-wan', status: 'missing' });
+    expect(beforeProvisioning.items[0]).to.include({
+      reference: 'block-ssh-wan',
+      status: 'missing',
+    });
 
     // Simulate the Provisioning Engine having applied it to the router.
     fakeClient.closed = false;
@@ -88,9 +99,23 @@ describe('Declarative desired-state store driving the Synchronization Engine end
       protocol: 'tcp',
     });
 
-    const afterProvisioning = await generatePlan.execute({ resourceTypes: ['filter-rule'], routerId: 'router-1' });
-    expect(afterProvisioning.items[0]).to.include({ reference: 'block-ssh-wan', status: 'in_sync' });
-    expect(afterProvisioning.summary).to.deep.equal({ drifted: 0, inSync: 1, missing: 0, total: 1, unexpected: 0 });
+    const afterProvisioning = await generatePlan.execute({
+      resourceTypes: ['filter-rule'],
+      routerId: 'router-1',
+    });
+    expect(afterProvisioning.items[0]).to.include({
+      reference: 'block-ssh-wan',
+      status: 'in_sync',
+    });
+    expect(afterProvisioning.summary).to.deep.equal({
+      ambiguous: 0,
+      drifted: 0,
+      inSync: 1,
+      isConverged: true,
+      missing: 0,
+      total: 1,
+      unexpected: 0,
+    });
   });
 
   it('reports drifted when the declared state is edited after the router already matched the old declaration', async () => {
@@ -115,7 +140,10 @@ describe('Declarative desired-state store driving the Synchronization Engine end
       routerId: 'router-1',
     });
 
-    const plan = await generatePlan.execute({ resourceTypes: ['filter-rule'], routerId: 'router-1' });
+    const plan = await generatePlan.execute({
+      resourceTypes: ['filter-rule'],
+      routerId: 'router-1',
+    });
     expect(plan.items[0]).to.include({ reference: 'block-ssh-wan', status: 'drifted' });
     expect(plan.items[0]?.differingFields).to.deep.equal(['protocol']);
   });
@@ -127,11 +155,22 @@ describe('Declarative desired-state store driving the Synchronization Engine end
       resourceType: 'filter-rule',
       routerId: 'router-1',
     });
-    await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment: 'cuzonet:firewall-filter:block-ssh-wan' });
+    await fakeClient.createFilterRule({
+      action: 'drop',
+      chain: 'input',
+      comment: 'cuzonet:firewall-filter:block-ssh-wan',
+    });
 
-    await removeState.execute({ reference: 'block-ssh-wan', resourceType: 'filter-rule', routerId: 'router-1' });
+    await removeState.execute({
+      reference: 'block-ssh-wan',
+      resourceType: 'filter-rule',
+      routerId: 'router-1',
+    });
 
-    const plan = await generatePlan.execute({ resourceTypes: ['filter-rule'], routerId: 'router-1' });
+    const plan = await generatePlan.execute({
+      resourceTypes: ['filter-rule'],
+      routerId: 'router-1',
+    });
     expect(plan.items[0]).to.include({ reference: 'block-ssh-wan', status: 'unexpected' });
   });
 });

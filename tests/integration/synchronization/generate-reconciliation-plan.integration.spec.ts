@@ -16,7 +16,11 @@ const companyContext: CompanyContext = { getCompanyId: () => 'company-1' };
 const clock: Clock = { now: () => new Date('2026-07-21T12:00:00.000Z') };
 
 let counter = 0;
-function completedRequest(actionType: string, payload: Record<string, unknown>, completedAt: Date): ProvisioningRequest {
+function completedRequest(
+  actionType: string,
+  payload: Record<string, unknown>,
+  completedAt: Date,
+): ProvisioningRequest {
   counter += 1;
   const id = `req-${counter}`;
   const request = ProvisioningRequest.create({
@@ -126,7 +130,10 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
       comment: 'manually added by an operator during an incident',
     });
 
-    const plan = await useCase.execute({ resourceTypes: ['filter-rule', 'nat-rule'], routerId: 'router-1' });
+    const plan = await useCase.execute({
+      resourceTypes: ['filter-rule', 'nat-rule'],
+      routerId: 'router-1',
+    });
 
     const byReference = new Map(plan.items.map((item) => [item.reference, item]));
     expect(byReference.get('allow-lan')?.status).to.equal('in_sync');
@@ -136,7 +143,15 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
     const unexpected = plan.items.find((item) => item.status === 'unexpected');
     expect(unexpected?.reference).to.match(/^unmanaged:/);
 
-    expect(plan.summary).to.deep.equal({ drifted: 1, inSync: 1, missing: 1, total: 4, unexpected: 1 });
+    expect(plan.summary).to.deep.equal({
+      ambiguous: 0,
+      drifted: 1,
+      inSync: 1,
+      isConverged: false,
+      missing: 1,
+      total: 4,
+      unexpected: 1,
+    });
     expect(plan.mode).to.equal('dry-run');
     expect(plan.routerId).to.equal('router-1');
   });
@@ -159,10 +174,16 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
     // The router was never actually cleaned up (e.g. the dispatch is still pending) — should surface as unexpected.
     await fakeClient.createAddressListEntry({ address: '192.168.1.10', list: 'blocked-ips' });
 
-    const plan = await useCase.execute({ resourceTypes: ['address-list-entry'], routerId: 'router-1' });
+    const plan = await useCase.execute({
+      resourceTypes: ['address-list-entry'],
+      routerId: 'router-1',
+    });
 
     expect(plan.items).to.have.length(1);
-    expect(plan.items[0]).to.include({ reference: 'blocked-ips:192.168.1.10', status: 'unexpected' });
+    expect(plan.items[0]).to.include({
+      reference: 'blocked-ips:192.168.1.10',
+      status: 'unexpected',
+    });
   });
 
   /**
@@ -179,7 +200,10 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
       list: 'blocked-ips',
     });
 
-    const plan = await useCase.execute({ resourceTypes: ['address-list-entry'], routerId: 'router-1' });
+    const plan = await useCase.execute({
+      resourceTypes: ['address-list-entry'],
+      routerId: 'router-1',
+    });
 
     expect(plan.items).to.deep.equal([]);
     expect(plan.summary.unexpected).to.equal(0);
@@ -197,7 +221,10 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
       list: 'MOROSOS',
     });
 
-    const plan = await useCase.execute({ resourceTypes: ['address-list-entry'], routerId: 'router-1' });
+    const plan = await useCase.execute({
+      resourceTypes: ['address-list-entry'],
+      routerId: 'router-1',
+    });
 
     expect(plan.items).to.have.length(1);
     expect(plan.items[0]).to.include({ reference: 'MOROSOS:192.168.10.255', status: 'unexpected' });
@@ -209,6 +236,14 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
     const plan = await useCase.execute({ routerId: 'router-1' });
 
     expect(plan.items).to.deep.equal([]);
-    expect(plan.summary).to.deep.equal({ drifted: 0, inSync: 0, missing: 0, total: 0, unexpected: 0 });
+    expect(plan.summary).to.deep.equal({
+      ambiguous: 0,
+      drifted: 0,
+      inSync: 0,
+      isConverged: true,
+      missing: 0,
+      total: 0,
+      unexpected: 0,
+    });
   });
 });

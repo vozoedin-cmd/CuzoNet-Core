@@ -27,7 +27,12 @@ function seededRequest(): ProvisioningRequest {
     id: 'req-1',
     idempotencyKey: 'key-1',
     inputHash: 'hash',
-    inputSnapshotJson: JSON.stringify({ action: 'accept', chain: 'forward', routerId: 'router-1', ruleReference: 'allow-lan' }),
+    inputSnapshotJson: JSON.stringify({
+      action: 'accept',
+      chain: 'forward',
+      routerId: 'router-1',
+      ruleReference: 'allow-lan',
+    }),
     maxAttempts: 3,
     sourceExecutionId: undefined,
     targetId: 'target-1',
@@ -76,7 +81,11 @@ describe('Synchronization API integration', () => {
   });
 
   it('returns a dry-run reconciliation plan for the requested router', async () => {
-    await fakeClient.createFilterRule({ action: 'accept', chain: 'forward', comment: 'cuzonet:firewall-filter:allow-lan' });
+    await fakeClient.createFilterRule({
+      action: 'accept',
+      chain: 'forward',
+      comment: 'cuzonet:firewall-filter:allow-lan',
+    });
 
     const response = await request(app)
       .get('/api/v1/synchronization/routers/router-1/reconciliation-plan')
@@ -98,12 +107,22 @@ describe('Synchronization API integration', () => {
       .expect(200);
 
     expect(response.body.items).to.deep.equal([]);
-    expect(response.body.summary).to.deep.equal({ drifted: 0, inSync: 0, missing: 0, total: 0, unexpected: 0 });
+    expect(response.body.summary).to.deep.equal({
+      ambiguous: 0,
+      drifted: 0,
+      inSync: 0,
+      isConverged: true,
+      missing: 0,
+      total: 0,
+      unexpected: 0,
+    });
   });
 
   it('rejects an invalid resourceTypes value with 400', async () => {
     const response = await request(app)
-      .get('/api/v1/synchronization/routers/router-1/reconciliation-plan?resourceTypes=not-a-resource')
+      .get(
+        '/api/v1/synchronization/routers/router-1/reconciliation-plan?resourceTypes=not-a-resource',
+      )
       .expect(400);
 
     expect(response.body.error).to.match(/resourceTypes inválido/);

@@ -1,10 +1,13 @@
 import type { ReconciliationItem } from './reconciliation-item.js';
+import { isActionableReconciliationStatus } from './reconciliation-status.js';
 
 export type ReconciliationMode = 'dry-run';
 
 export interface ReconciliationSummary {
+  readonly ambiguous: number;
   readonly drifted: number;
   readonly inSync: number;
+  readonly isConverged: boolean;
   readonly missing: number;
   readonly total: number;
   readonly unexpected: number;
@@ -37,13 +40,24 @@ export class ReconciliationPlan {
     items: readonly ReconciliationItem[],
   ): ReconciliationPlan {
     const summary: ReconciliationSummary = {
+      ambiguous: items.filter((item) => item.status === 'ambiguous').length,
       drifted: items.filter((item) => item.status === 'drifted').length,
       inSync: items.filter((item) => item.status === 'in_sync').length,
+      isConverged: !items.some(
+        (item) => item.status === 'ambiguous' || isActionableReconciliationStatus(item.status),
+      ),
       missing: items.filter((item) => item.status === 'missing').length,
       total: items.length,
       unexpected: items.filter((item) => item.status === 'unexpected').length,
     };
-    return new ReconciliationPlan({ companyId, generatedAt, items, mode: 'dry-run', routerId, summary });
+    return new ReconciliationPlan({
+      companyId,
+      generatedAt,
+      items,
+      mode: 'dry-run',
+      routerId,
+      summary,
+    });
   }
 
   public get companyId(): string {

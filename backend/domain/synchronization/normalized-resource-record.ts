@@ -6,8 +6,10 @@
  * comment marker for rule-based resources, a natural key for the rest) —
  * never RouterOS's mutable ".id".
  */
+export type NormalizedFields = Readonly<Record<string, string>>;
+
 export interface NormalizedResourceRecord {
   readonly disabled: boolean;
-  readonly fields: Readonly<Record<string, string>>;
+  readonly fields: NormalizedFields;
   readonly reference: string;
 }

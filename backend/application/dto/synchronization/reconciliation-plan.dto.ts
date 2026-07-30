@@ -1,4 +1,7 @@
-import type { ReconciliationMode, ReconciliationSummary } from '../../../domain/synchronization/reconciliation-plan.js';
+import type {
+  ReconciliationMode,
+  ReconciliationSummary,
+} from '../../../domain/synchronization/reconciliation-plan.js';
 import type { ReconciliationStatus } from '../../../domain/synchronization/reconciliation-status.js';
 import type { SyncResourceType } from '../../../domain/synchronization/sync-resource-type.js';
 
@@ -6,8 +9,15 @@ import type { SyncResourceType } from '../../../domain/synchronization/sync-reso
 export { SYNC_RESOURCE_TYPES } from '../../../domain/synchronization/sync-resource-type.js';
 export type { SyncResourceType } from '../../../domain/synchronization/sync-resource-type.js';
 
+export interface ReconciliationActualCandidateDto {
+  disabled: boolean;
+  fields: Record<string, string>;
+}
+
 export interface ReconciliationItemDto {
+  actualCandidates?: ReconciliationActualCandidateDto[];
   actualFields?: Record<string, string>;
+  actualMatchCount?: number;
   desiredFields?: Record<string, string>;
   differingFields?: string[];
   reference: string;

@@ -1,4 +1,7 @@
-import type { ReconciliationItemDto, ReconciliationPlanDto } from '../../dto/synchronization/reconciliation-plan.dto.js';
+import type {
+  ReconciliationItemDto,
+  ReconciliationPlanDto,
+} from '../../dto/synchronization/reconciliation-plan.dto.js';
 import type { ReconciliationItem } from '../../../domain/synchronization/reconciliation-item.js';
 import type { ReconciliationPlan } from '../../../domain/synchronization/reconciliation-plan.js';
 
@@ -16,7 +19,16 @@ export class ReconciliationPlanMapper {
 
   private static itemToDto(item: ReconciliationItem): ReconciliationItemDto {
     return {
+      ...(item.actualCandidates !== undefined
+        ? {
+            actualCandidates: item.actualCandidates.map((candidate) => ({
+              disabled: candidate.disabled,
+              fields: { ...candidate.fields },
+            })),
+          }
+        : {}),
       ...(item.actualFields !== undefined ? { actualFields: { ...item.actualFields } } : {}),
+      ...(item.actualMatchCount !== undefined ? { actualMatchCount: item.actualMatchCount } : {}),
       ...(item.desiredFields !== undefined ? { desiredFields: { ...item.desiredFields } } : {}),
       ...(item.differingFields !== undefined ? { differingFields: [...item.differingFields] } : {}),
       reference: item.reference,
