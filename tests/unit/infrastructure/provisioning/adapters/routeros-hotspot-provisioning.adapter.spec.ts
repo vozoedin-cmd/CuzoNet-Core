@@ -62,7 +62,6 @@ describe('RouterOsHotspotProvisioningAdapter', () => {
           name: 'cliente-1',
           profile: 'default',
           routerId: 'router-1',
-          sharedUsers: 2,
         }),
       );
 
@@ -71,7 +70,6 @@ describe('RouterOsHotspotProvisioningAdapter', () => {
       expect(fakeClient.hotspotUsers[0]?.name).to.equal('cliente-1');
       expect(fakeClient.hotspotUsers[0]?.password).to.equal('pass123');
       expect(fakeClient.hotspotUsers[0]?.profile).to.equal('default');
-      expect(fakeClient.hotspotUsers[0]?.sharedUsers).to.equal(2);
     });
 
     it('is idempotent when an identical user already exists', async () => {

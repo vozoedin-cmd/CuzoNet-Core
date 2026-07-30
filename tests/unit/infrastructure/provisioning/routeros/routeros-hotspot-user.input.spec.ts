@@ -13,7 +13,6 @@ describe('routerOsHotspotUserInputSchema', () => {
       profile: 'default',
       routerId: 'router-1',
       server: 'hotspot1',
-      sharedUsers: 1,
     };
     const result = routerOsHotspotUserInputSchema.safeParse(payload);
     expect(result.success).to.equal(true);

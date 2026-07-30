@@ -241,7 +241,6 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(user.limitBytesTotal !== undefined ? { limitBytesTotal: user.limitBytesTotal } : {}),
       ...(user.limitUptime !== undefined ? { limitUptime: user.limitUptime } : {}),
       ...(user.server !== undefined ? { server: user.server } : {}),
-      ...(user.sharedUsers !== undefined ? { sharedUsers: user.sharedUsers } : {}),
       disabled: user.disabled ?? false,
       id: `*${this.nextId++}`,
       name: user.name,
@@ -322,7 +321,6 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.password !== undefined ? { password: data.password } : {}),
       ...(data.profile !== undefined ? { profile: data.profile } : {}),
       ...(data.server !== undefined ? { server: data.server } : {}),
-      ...(data.sharedUsers !== undefined ? { sharedUsers: data.sharedUsers } : {}),
     };
     this.hotspotUsers[index] = userData;
   }

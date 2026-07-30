@@ -6,7 +6,6 @@ import { HotspotLimitUptime } from '../../../../../backend/domain/provisioning/r
 import { HotspotPassword } from '../../../../../backend/domain/provisioning/routeros/value-objects/hotspot-password.js';
 import { HotspotProfileName } from '../../../../../backend/domain/provisioning/routeros/value-objects/hotspot-profile-name.js';
 import { HotspotServerName } from '../../../../../backend/domain/provisioning/routeros/value-objects/hotspot-server-name.js';
-import { HotspotSharedUsers } from '../../../../../backend/domain/provisioning/routeros/value-objects/hotspot-shared-users.js';
 import { HotspotUsername } from '../../../../../backend/domain/provisioning/routeros/value-objects/hotspot-username.js';
 
 describe('Hotspot value objects', () => {
@@ -86,15 +85,4 @@ describe('Hotspot value objects', () => {
     });
   });
 
-  describe('HotspotSharedUsers', () => {
-    it('accepts positive integers', () => {
-      expect(HotspotSharedUsers.create(3).value).to.equal(3);
-    });
-    it('rejects zero', () => {
-      expect(() => HotspotSharedUsers.create(0)).to.throw();
-    });
-    it('rejects non-integer values', () => {
-      expect(() => HotspotSharedUsers.create(1.5)).to.throw();
-    });
-  });
 });

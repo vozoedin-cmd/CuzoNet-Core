@@ -321,7 +321,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (user.server !== undefined) attributes.server = user.server;
     if (user.limitUptime !== undefined) attributes['limit-uptime'] = user.limitUptime;
     if (user.limitBytesTotal !== undefined) attributes['limit-bytes-total'] = String(user.limitBytesTotal);
-    if (user.sharedUsers !== undefined) attributes['shared-users'] = String(user.sharedUsers);
     if (user.disabled !== undefined) attributes.disabled = user.disabled ? 'yes' : 'no';
 
     await this.client.execute('/ip/hotspot/user/add', {
@@ -363,7 +362,7 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
 
     const replies = await this.client.print('/ip/hotspot/user', {
       attributes: {
-        '.proplist': '.id,name,server,profile,password,disabled,comment,limit-uptime,limit-bytes-total,shared-users',
+        '.proplist': '.id,name,server,profile,password,disabled,comment,limit-uptime,limit-bytes-total',
       },
       queries: [query],
       timeoutMs: this.timeoutMs,
@@ -375,7 +374,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     }
 
     const limitBytesTotal = reply['limit-bytes-total'] ? Number(reply['limit-bytes-total']) : undefined;
-    const sharedUsers = reply['shared-users'] ? Number(reply['shared-users']) : undefined;
 
     return {
       comment: reply.comment ?? '',
@@ -387,7 +385,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       password: reply.password ?? '',
       profile: reply.profile ?? '',
       server: reply.server ?? '',
-      ...(sharedUsers !== undefined ? { sharedUsers } : {}),
     };
   }
 
@@ -416,7 +413,6 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (data.server !== undefined) attributes.server = data.server;
     if (data.limitUptime !== undefined) attributes['limit-uptime'] = data.limitUptime;
     if (data.limitBytesTotal !== undefined) attributes['limit-bytes-total'] = String(data.limitBytesTotal);
-    if (data.sharedUsers !== undefined) attributes['shared-users'] = String(data.sharedUsers);
     if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
 
     if (Object.keys(attributes).length === 1) return;

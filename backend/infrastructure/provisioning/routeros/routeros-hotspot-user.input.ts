@@ -22,7 +22,12 @@ const limitUptime = z
 
 const limitBytesTotal = z.number().int().min(0, 'Debe ser un entero mayor o igual a cero.').optional();
 
-const sharedUsers = z.number().int().min(1, 'Debe ser un entero mayor o igual a uno.').optional();
+/**
+ * NOTA: `sharedUsers` fue removido del contrato. RouterOS lo expone en
+ * /ip/hotspot/user/profile, no en /ip/hotspot/user; enviarlo en un add/set de
+ * usuario provoca "unknown parameter shared-users". Corresponde a un futuro
+ * módulo de perfiles de Hotspot.
+ */
 
 export const routerOsHotspotUserCreateSchema = baseRouterOsHotspotUserSchema.extend({
   actionType: z.literal('routeros.hotspot.user.create'),
@@ -48,7 +53,6 @@ export const routerOsHotspotUserCreateSchema = baseRouterOsHotspotUserSchema.ext
     .min(1, 'El servidor no puede estar vacío.')
     .regex(noControlChars, 'El servidor contiene caracteres de control no permitidos.')
     .optional(),
-  sharedUsers,
 });
 export type RouterOsHotspotUserCreateInput = z.infer<typeof routerOsHotspotUserCreateSchema>;
 
@@ -79,7 +83,6 @@ export const routerOsHotspotUserUpdateSchema = baseRouterOsHotspotUserSchema.ext
     .min(1, 'El servidor no puede estar vacío.')
     .regex(noControlChars, 'El servidor contiene caracteres de control no permitidos.')
     .optional(),
-  sharedUsers,
   userReference: z.string().min(1, 'La referencia del usuario no puede estar vacía.'),
 });
 export type RouterOsHotspotUserUpdateInput = z.infer<typeof routerOsHotspotUserUpdateSchema>;

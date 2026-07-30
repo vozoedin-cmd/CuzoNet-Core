@@ -18,7 +18,6 @@ import { HotspotLimitUptime } from '../../../domain/provisioning/routeros/value-
 import { HotspotPassword } from '../../../domain/provisioning/routeros/value-objects/hotspot-password.js';
 import { HotspotProfileName } from '../../../domain/provisioning/routeros/value-objects/hotspot-profile-name.js';
 import { HotspotServerName } from '../../../domain/provisioning/routeros/value-objects/hotspot-server-name.js';
-import { HotspotSharedUsers } from '../../../domain/provisioning/routeros/value-objects/hotspot-shared-users.js';
 import { HotspotUsername } from '../../../domain/provisioning/routeros/value-objects/hotspot-username.js';
 import {
   routerOsHotspotUserInputSchema,
@@ -76,12 +75,11 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
     const comment = command.comment === undefined ? undefined : HotspotComment.create(command.comment);
     const limitUptime = command.limitUptime === undefined ? undefined : HotspotLimitUptime.create(command.limitUptime);
     const limitBytesTotal = command.limitBytesTotal === undefined ? undefined : HotspotLimitBytes.create(command.limitBytesTotal);
-    const sharedUsers = command.sharedUsers === undefined ? undefined : HotspotSharedUsers.create(command.sharedUsers);
     const disabled = command.disabled ?? false;
 
     const existing = await client.findHotspotUser({ name: name.value });
     if (existing) {
-      if (this.isEquivalent(existing, { comment, disabled, limitBytesTotal, limitUptime, password, profile, server, sharedUsers })) {
+      if (this.isEquivalent(existing, { comment, disabled, limitBytesTotal, limitUptime, password, profile, server })) {
         return name.value; // Idempotent success
       }
       throw new RouterOsHotspotConflictError(
@@ -94,7 +92,6 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
       ...(limitBytesTotal !== undefined ? { limitBytesTotal: limitBytesTotal.value } : {}),
       ...(limitUptime !== undefined ? { limitUptime: limitUptime.value } : {}),
       ...(server !== undefined ? { server: server.value } : {}),
-      ...(sharedUsers !== undefined ? { sharedUsers: sharedUsers.value } : {}),
       disabled,
       name: name.value,
       password: password.value,
@@ -125,7 +122,6 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
     const comment = command.comment === undefined ? undefined : HotspotComment.create(command.comment);
     const limitUptime = command.limitUptime === undefined ? undefined : HotspotLimitUptime.create(command.limitUptime);
     const limitBytesTotal = command.limitBytesTotal === undefined ? undefined : HotspotLimitBytes.create(command.limitBytesTotal);
-    const sharedUsers = command.sharedUsers === undefined ? undefined : HotspotSharedUsers.create(command.sharedUsers);
 
     const updateData: MutableHotspotUserUpdateData = {};
     if (name !== undefined && name.value !== existing.name) updateData.name = name.value;
@@ -135,7 +131,6 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
     if (comment !== undefined && comment.value !== (existing.comment ?? '')) updateData.comment = comment.value;
     if (limitUptime !== undefined && limitUptime.value !== existing.limitUptime) updateData.limitUptime = limitUptime.value;
     if (limitBytesTotal !== undefined && limitBytesTotal.value !== existing.limitBytesTotal) updateData.limitBytesTotal = limitBytesTotal.value;
-    if (sharedUsers !== undefined && sharedUsers.value !== existing.sharedUsers) updateData.sharedUsers = sharedUsers.value;
     if (command.disabled !== undefined && command.disabled !== existing.disabled) updateData.disabled = command.disabled;
 
     if (Object.keys(updateData).length === 0) {
@@ -202,7 +197,6 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
       password: HotspotPassword;
       profile: HotspotProfileName;
       server: HotspotServerName | undefined;
-      sharedUsers: HotspotSharedUsers | undefined;
     },
   ): boolean {
     return (
@@ -212,8 +206,7 @@ export class RouterOsHotspotProvisioningAdapter extends RouterOsProvisioningAdap
       (existing.server ?? '') === (expected.server?.value ?? '') &&
       (existing.comment ?? '') === (expected.comment?.value ?? '') &&
       existing.limitUptime === expected.limitUptime?.value &&
-      existing.limitBytesTotal === expected.limitBytesTotal?.value &&
-      existing.sharedUsers === expected.sharedUsers?.value
+      existing.limitBytesTotal === expected.limitBytesTotal?.value
     );
   }
 

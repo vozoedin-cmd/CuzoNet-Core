@@ -67,6 +67,12 @@ export interface RouterOsHotspotUserReference {
   readonly name?: string;
 }
 
+/**
+ * NOTA: `shared-users` NO forma parte de /ip/hotspot/user — es una propiedad de
+ * /ip/hotspot/user/profile. Enviarla en /ip/hotspot/user/add hace que RouterOS
+ * responda "unknown parameter shared-users". Su administración corresponde a un
+ * futuro módulo de perfiles de Hotspot, no al usuario.
+ */
 export interface RouterOsHotspotUser {
   readonly comment?: string;
   readonly disabled: boolean;
@@ -77,7 +83,6 @@ export interface RouterOsHotspotUser {
   readonly password?: string;
   readonly profile: string;
   readonly server?: string;
-  readonly sharedUsers?: number;
 }
 
 export interface RouterOsHotspotUserCreateData {
@@ -89,7 +94,6 @@ export interface RouterOsHotspotUserCreateData {
   readonly password: string;
   readonly profile: string;
   readonly server?: string;
-  readonly sharedUsers?: number;
 }
 
 export interface RouterOsHotspotUserUpdateData {
@@ -101,7 +105,6 @@ export interface RouterOsHotspotUserUpdateData {
   readonly password?: string;
   readonly profile?: string;
   readonly server?: string;
-  readonly sharedUsers?: number;
 }
 
 export interface RouterOsAddressListEntryReference {
