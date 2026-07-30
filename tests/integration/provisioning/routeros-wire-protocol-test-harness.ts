@@ -117,23 +117,46 @@ function parseSentence(
   return { attributes, command: command ?? '', queries, tag };
 }
 
+/** Un `!trap` de RouterOS. `RouterOSTrapError.message` toma exactamente `message`. */
+export interface FakeRouterOsTrap {
+  /** Categoria numerica de RouterOS; se omite si no se indica. */
+  readonly category?: string;
+  /** Solo se dispara para los comandos que terminan en este sufijo (p. ej. "/add"). Sin el, aplica a cualquiera. */
+  readonly forCommandEndingIn?: string;
+  readonly message: string;
+}
+
 export interface FakeRouterOsServer {
   readonly captured: CapturedCommand[];
   /** Cuando esta seteado, cualquier comando que termine en "print" responde con un !re de este registro antes del !done. */
   existingRecord: Record<string, string> | undefined;
+  /**
+   * Varias filas para un mismo "print", en orden. Tiene prioridad sobre `existingRecord`;
+   * un array vacio representa explicitamente "sin resultados".
+   */
+  existingRecords: Record<string, string>[] | undefined;
   port: number;
   profile(overrides?: Partial<RouterConnectionProfile>): RouterConnectionProfile;
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Responde con `!trap` en lugar de `!done`, para certificar el mapeo de errores. */
+  trap: FakeRouterOsTrap | undefined;
 }
 
 /** Crea un servidor RouterOS API TCP falso (socket real, framing binario real) para pruebas de wire protocol. */
 export function createFakeRouterOsServer(): FakeRouterOsServer {
   let server: Server;
   const captured: CapturedCommand[] = [];
-  const state: { existingRecord: Record<string, string> | undefined; port: number } = {
+  const state: {
+    existingRecord: Record<string, string> | undefined;
+    existingRecords: Record<string, string>[] | undefined;
+    port: number;
+    trap: FakeRouterOsTrap | undefined;
+  } = {
     existingRecord: undefined,
+    existingRecords: undefined,
     port: 0,
+    trap: undefined,
   };
 
   return {
@@ -143,6 +166,18 @@ export function createFakeRouterOsServer(): FakeRouterOsServer {
     },
     set existingRecord(value: Record<string, string> | undefined) {
       state.existingRecord = value;
+    },
+    get existingRecords() {
+      return state.existingRecords;
+    },
+    set existingRecords(value: Record<string, string>[] | undefined) {
+      state.existingRecords = value;
+    },
+    get trap() {
+      return state.trap;
+    },
+    set trap(value: FakeRouterOsTrap | undefined) {
+      state.trap = value;
     },
     get port() {
       return state.port;
@@ -161,6 +196,8 @@ export function createFakeRouterOsServer(): FakeRouterOsServer {
     async start(): Promise<void> {
       captured.length = 0;
       state.existingRecord = undefined;
+      state.existingRecords = undefined;
+      state.trap = undefined;
       server = createServer((socket: Socket) => {
         const reader = new SentenceReader();
         socket.on('data', (chunk: Buffer) => {
@@ -169,8 +206,33 @@ export function createFakeRouterOsServer(): FakeRouterOsServer {
             if (command !== '/login') {
               captured.push({ attributes, command, queries });
             }
-            if (command.endsWith('/print') && state.existingRecord) {
-              socket.write(encodeSentence(['!re', ...attributeWords(state.existingRecord), `.tag=${tag}`]));
+
+            const trap = state.trap;
+            const trapApplies =
+              trap !== undefined &&
+              command !== '/login' &&
+              (trap.forCommandEndingIn === undefined || command.endsWith(trap.forCommandEndingIn));
+            if (trapApplies) {
+              socket.write(
+                encodeSentence([
+                  '!trap',
+                  ...attributeWords({
+                    ...(trap.category !== undefined ? { category: trap.category } : {}),
+                    message: trap.message,
+                  }),
+                  `.tag=${tag}`,
+                ]),
+              );
+              socket.write(encodeSentence(['!done', `.tag=${tag}`]));
+              continue;
+            }
+
+            if (command.endsWith('/print')) {
+              // `existingRecords` gana sobre `existingRecord`; `[]` significa "sin resultados".
+              const rows = state.existingRecords ?? (state.existingRecord ? [state.existingRecord] : []);
+              for (const row of rows) {
+                socket.write(encodeSentence(['!re', ...attributeWords(row), `.tag=${tag}`]));
+              }
             }
             socket.write(encodeSentence(['!done', `.tag=${tag}`]));
           }
