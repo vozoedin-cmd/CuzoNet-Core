@@ -429,6 +429,126 @@ export interface RouterOsNatRuleMoveTarget {
   readonly placeBeforeId?: string;
 }
 
+/**
+ * Clasificación del comentario de una regla Mangle respecto a la propiedad de CuzoNet.
+ * Mismos cuatro estados y misma semántica que en Firewall Filter y NAT: solo `valid`
+ * aporta `ruleReference`, y por tanto es el único resoluble.
+ */
+export type RouterOsMangleRuleOwnershipStatus = 'valid' | 'malformed' | 'foreign' | 'unmanaged';
+
+export interface RouterOsMangleRuleOwnership {
+  readonly status: RouterOsMangleRuleOwnershipStatus;
+  readonly ruleReference?: string;
+  readonly userComment?: string;
+}
+
+/**
+ * Valores que RouterOS 7.21.4 materializa por su cuenta en una regla de
+ * `/ip/firewall/mangle` recién creada.
+ *
+ * OBSERVADO, no supuesto. Durante la certificación de este recurso se crearon cuatro
+ * reglas de sonda (deshabilitadas, en `prerouting`) contra un hEX real y se releyeron de
+ * inmediato: `passthrough` volvió como `"true"` en las tres acciones soportadas
+ * —`mark-connection`, `mark-packet` y `mark-routing`— tanto omitiéndolo como enviándolo
+ * explícitamente. El router nunca deja el campo ausente.
+ *
+ * Es necesario para la idempotencia: comparar un `passthrough` omitido contra `undefined`
+ * produce un conflicto falso en cada reintento, porque el router siempre devuelve un valor.
+ *
+ * LIMITACIONES CONOCIDAS, deliberadamente no verificadas:
+ * - No se observó `passthrough=no`; se sabe que el default es `true` y que `yes` devuelve
+ *   `true`, no que `no` devuelva `false`.
+ * - No se observó `action=passthrough`, la cuarta acción que admite el esquema; podría
+ *   materializar un default distinto.
+ * No se asumen otros defaults que no hayan sido observados.
+ */
+export const ROUTEROS_MANGLE_RULE_DEFAULTS = {
+  passthrough: true,
+} as const;
+
+/**
+ * Una regla de `/ip/firewall/mangle` tal como se observa en el router.
+ *
+ * `dynamic`, `invalid`, `bytes`, `packets` y `physicalIndex` son de SOLO LECTURA. Los
+ * cuatro primeros se observaron materializados en el 100% de las reglas de sonda.
+ *
+ * `passthrough` NO es opcional: RouterOS siempre lo devuelve (ver
+ * `ROUTEROS_MANGLE_RULE_DEFAULTS`). Modelarlo como opcional es justamente lo que rompía la
+ * idempotencia del recurso.
+ *
+ * `physicalIndex` solo está presente cuando la regla proviene de un listado completo; una
+ * búsqueda por `.id` devuelve una fila suelta y omite el campo en lugar de inventarlo.
+ *
+ * `newRoutingMark` usa la nomenclatura observada en 7.21.4: el router devuelve
+ * `new-routing-mark`, no `routing-mark` ni `routing-table`, y valida su valor contra el
+ * conjunto de tablas de enrutamiento existentes.
+ */
+export interface ObservedMangleRule {
+  readonly id: string;
+  readonly physicalIndex?: number;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly chain: string;
+  readonly action: string;
+  readonly comment?: string;
+  readonly ownership: RouterOsMangleRuleOwnership;
+  readonly disabled: boolean;
+  readonly passthrough: boolean;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly connectionState?: string;
+  readonly connectionMark?: string;
+  readonly packetMark?: string;
+  readonly routingMark?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
+/** Campos de una regla Mangle que CuzoNet administra: los que puede escribir y comparar. */
+export interface ManagedMangleRuleSpec {
+  readonly chain: string;
+  readonly action: string;
+  readonly comment: string;
+  readonly disabled?: boolean;
+  readonly passthrough?: boolean;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly connectionState?: string;
+  readonly connectionMark?: string;
+  readonly packetMark?: string;
+  readonly routingMark?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+}
+
+export interface RouterOsMangleRuleIdLocator {
+  readonly kind: 'id';
+  readonly id: string;
+}
+
+export interface RouterOsMangleRuleReferenceLocator {
+  readonly kind: 'managed-reference';
+  readonly ruleReference: string;
+}
+
+export type RouterOsMangleRuleLocator =
+  | RouterOsMangleRuleIdLocator
+  | RouterOsMangleRuleReferenceLocator;
+
 export interface RouterOsMangleRuleReference {
   readonly id?: string;
   readonly ruleReference?: string;

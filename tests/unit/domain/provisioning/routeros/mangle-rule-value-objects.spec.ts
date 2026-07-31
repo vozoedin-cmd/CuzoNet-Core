@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../../../backend/application/ports/provisioning/routeros/routeros-client.port.js';
 
 import { MangleAction } from '../../../../../backend/domain/provisioning/routeros/value-objects/mangle-action.js';
 import { MangleChain } from '../../../../../backend/domain/provisioning/routeros/value-objects/mangle-chain.js';
@@ -84,6 +85,81 @@ describe('Mangle rule value objects', () => {
       expect(MangleRuleComment.extractReference('cuzonet:firewall-mangle:mark-voip extra')).to.equal('mark-voip');
       expect(MangleRuleComment.extractReference('cuzonet:firewall-filter:block-ssh-wan')).to.equal(null);
       expect(MangleRuleComment.extractReference('cuzonet:firewall-nat:wan-masquerade')).to.equal(null);
+    });
+  });
+
+  describe('MangleRuleComment.parseOwnership', () => {
+    it('reads a valid marker, its reference and the user comment', () => {
+      expect(MangleRuleComment.parseOwnership('cuzonet:firewall-mangle:marca-voip prioridad')).to.deep.equal({
+        ruleReference: 'marca-voip',
+        status: 'valid',
+        userComment: 'prioridad',
+      });
+    });
+
+    it('omits userComment when the marker carries nothing else', () => {
+      expect(MangleRuleComment.parseOwnership('cuzonet:firewall-mangle:marca-voip')).to.deep.equal({
+        ruleReference: 'marca-voip',
+        status: 'valid',
+      });
+    });
+
+    it('classifies a marker of another CuzoNet resource as foreign', () => {
+      for (const comment of ['cuzonet:firewall-filter:x', 'cuzonet:firewall-nat:y', 'cuzonet:resource:1']) {
+        expect(MangleRuleComment.parseOwnership(comment).status, comment).to.equal('foreign');
+      }
+    });
+
+    it('classifies a marker without a usable reference as malformed', () => {
+      for (const comment of ['cuzonet:firewall-mangle:', 'cuzonet:firewall-mangle: con espacio']) {
+        expect(MangleRuleComment.parseOwnership(comment).status, comment).to.equal('malformed');
+      }
+    });
+
+    it('classifies anything else as unmanaged', () => {
+      for (const comment of ['puesta a mano', '', '   ', undefined, null]) {
+        expect(MangleRuleComment.parseOwnership(comment).status, String(comment)).to.equal('unmanaged');
+      }
+    });
+
+    it('only the valid status carries a ruleReference', () => {
+      const parsed = ['cuzonet:firewall-mangle:ok', 'cuzonet:otra', 'cuzonet:firewall-mangle:', 'a mano']
+        .map((c) => MangleRuleComment.parseOwnership(c));
+
+      expect(parsed[0]?.ruleReference).to.equal('ok');
+      for (const entry of parsed.slice(1)) {
+        expect(entry.ruleReference, entry.status).to.equal(undefined);
+      }
+    });
+
+    it('produces exactly the four declared statuses, and no others', () => {
+      const statuses = new Set(
+        [
+          'cuzonet:firewall-mangle:a libre',
+          'cuzonet:firewall-mangle:b',
+          'cuzonet:firewall-nat:c',
+          'cuzonet:firewall-mangle:',
+          'a mano',
+          ' ',
+        ].map((c) => MangleRuleComment.parseOwnership(c).status),
+      );
+
+      expect([...statuses].sort()).to.deep.equal(['foreign', 'malformed', 'unmanaged', 'valid']);
+    });
+  });
+
+  /**
+   * El default no es una preferencia de diseno: es lo que RouterOS 7.21.4 materializa. Se
+   * observo creando reglas de sonda contra un hEX real y releyendolas de inmediato.
+   * Cambiarlo sin nueva evidencia rompe la idempotencia del recurso.
+   */
+  describe('ROUTEROS_MANGLE_RULE_DEFAULTS', () => {
+    it('declares passthrough as true, the value observed on RouterOS 7.21.4', () => {
+      expect(ROUTEROS_MANGLE_RULE_DEFAULTS.passthrough).to.equal(true);
+    });
+
+    it('declares only the defaults actually observed', () => {
+      expect(Object.keys(ROUTEROS_MANGLE_RULE_DEFAULTS)).to.deep.equal(['passthrough']);
     });
   });
 });
