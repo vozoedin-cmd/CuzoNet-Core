@@ -24,6 +24,7 @@ import { RouterOsNatRuleAmbiguousError } from '../../../domain/provisioning/rout
 import { RouterOsNatRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-conflict.error.js';
 import { RouterOsNatRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-dynamic.error.js';
 import { RouterOsNatRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-not-found.error.js';
+import { RouterOsNatRulePostconditionError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-postcondition.error.js';
 import {
   routerOsNatRuleInputSchema,
   type RouterOsNatRuleAddInput,
@@ -126,6 +127,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
       ...(desired.toPorts !== undefined ? { toPorts: desired.toPorts } : {}),
     };
     await client.createNatRule(createData);
+    await this.assertExactlyOneAfterCreate(client, ruleReference.value);
     return ruleReference.value;
   }
 
@@ -243,6 +245,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     }
     this.assertNotDynamic(existing, command.ruleReference);
     await client.removeNatRule({ kind: 'id', id: existing.id });
+    await this.assertAbsentAfterRemove(client, command.ruleReference);
     return command.ruleReference;
   }
 
@@ -323,6 +326,44 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     );
   }
 
+  /**
+   * Postcondicion de `create`: releer y confirmar que la referencia quedo en exactamente
+   * una regla. Cero significa que el router acepto el comando pero no persistio nada; dos
+   * o mas, que se creo un duplicado y toda operacion posterior sobre esa referencia seria
+   * ambigua. La relectura aporta aqui lo que el `!done` no garantiza.
+   */
+  private async assertExactlyOneAfterCreate(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<void> {
+    const matches = await client.findNatRulesByReference(ruleReference);
+    if (matches.length === 1) {
+      return;
+    }
+    throw new RouterOsNatRulePostconditionError(
+      matches.length === 0
+        ? `El router acepto la creacion de la regla NAT ${ruleReference} pero no existe al releer.`
+        : `La creacion de la regla NAT ${ruleReference} dejo ${matches.length} reglas con la ` +
+          `misma referencia (${matches.map((rule) => rule.id).join(', ')}).`,
+    );
+  }
+
+  /** Postcondicion de `remove`: releer y confirmar que no queda ninguna regla con la referencia. */
+  private async assertAbsentAfterRemove(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<void> {
+    const matches = await client.findNatRulesByReference(ruleReference);
+    if (matches.length === 0) {
+      return;
+    }
+    throw new RouterOsNatRulePostconditionError(
+      `El router acepto la eliminacion de la regla NAT ${ruleReference} pero al releer siguen ` +
+        `existiendo ${matches.length} reglas con esa referencia ` +
+        `(${matches.map((rule) => rule.id).join(', ')}).`,
+    );
+  }
+
   private isEquivalent(existing: ObservedNatRule, desired: DesiredNatRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
@@ -366,6 +407,13 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (error instanceof RouterOsNatRuleDynamicError) {
       return {
         errorCode: 'ROUTEROS_NAT_RULE_DYNAMIC',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsNatRulePostconditionError) {
+      return {
+        errorCode: 'ROUTEROS_NAT_RULE_POSTCONDITION_FAILED',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };

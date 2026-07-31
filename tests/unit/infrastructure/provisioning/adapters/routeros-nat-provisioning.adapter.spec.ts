@@ -588,4 +588,161 @@ describe('RouterOsNatProvisioningAdapter', () => {
       expect(fakeClient.natRules.find((r) => r.ruleReference === 'static-one')?.disabled).to.equal(true);
     });
   });
+
+  /**
+   * Postcondiciones. Solo `create` y `remove` releen: son las dos operaciones cuyo efecto
+   * prometido (existe / ya no existe) el `!done` de RouterOS no garantiza por si mismo. En
+   * update/enable/disable/move la confirmacion del router basta.
+   */
+  describe('postconditions', () => {
+    const REFERENCE = 'port-8080';
+    const addPayload = {
+      action: 'dst-nat',
+      chain: 'dstnat',
+      routerId: 'router-1',
+      ruleReference: REFERENCE,
+      toAddresses: '192.168.1.50',
+    };
+
+    describe('create', () => {
+      it('re-reads and succeeds when exactly one rule carries the reference', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findNatRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.nat.add').execute(
+          input('routeros.firewall.nat.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('success');
+        // Una resolucion previa y una relectura posterior.
+        expect(findSpy).toHaveBeenCalledTimes(2);
+        expect(fakeClient.natRules).to.have.length(1);
+      });
+
+      it('fails with POSTCONDITION_FAILED when the router accepted the add but persisted nothing', async () => {
+        vi.spyOn(fakeClient, 'createNatRule').mockResolvedValueOnce(undefined);
+
+        const result = await adapterFor('routeros.firewall.nat.add').execute(
+          input('routeros.firewall.nat.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_POSTCONDITION_FAILED');
+          expect(result.errorMessage).to.contain(REFERENCE);
+        }
+      });
+
+      it('fails with POSTCONDITION_FAILED when the add left a duplicate reference', async () => {
+        const original = fakeClient.createNatRule.bind(fakeClient);
+        vi.spyOn(fakeClient, 'createNatRule').mockImplementationOnce(async (rule) => {
+          await original(rule);
+          await original(rule); // el router duplica la regla
+        });
+
+        const result = await adapterFor('routeros.firewall.nat.add').execute(
+          input('routeros.firewall.nat.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_POSTCONDITION_FAILED');
+          expect(result.errorMessage).to.contain('2');
+        }
+      });
+
+      it('does not re-read when the create was an idempotent no-op', async () => {
+        await fakeClient.createNatRule({
+          action: 'dst-nat',
+          chain: 'dstnat',
+          comment: `cuzonet:firewall-nat:${REFERENCE}`,
+          toAddresses: '192.168.1.50',
+        });
+        const findSpy = vi.spyOn(fakeClient, 'findNatRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.nat.add').execute(
+          input('routeros.firewall.nat.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('remove', () => {
+      beforeEach(async () => {
+        await fakeClient.createNatRule({
+          action: 'dst-nat',
+          chain: 'dstnat',
+          comment: `cuzonet:firewall-nat:${REFERENCE}`,
+          toAddresses: '192.168.1.50',
+        });
+      });
+
+      it('re-reads and succeeds once the rule is gone', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findNatRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.nat.remove').execute(
+          input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(2);
+        expect(fakeClient.natRules).to.have.length(0);
+      });
+
+      it('fails with POSTCONDITION_FAILED when the rule survives the removal', async () => {
+        vi.spyOn(fakeClient, 'removeNatRule').mockResolvedValueOnce(undefined);
+
+        const result = await adapterFor('routeros.firewall.nat.remove').execute(
+          input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_POSTCONDITION_FAILED');
+        }
+        expect(fakeClient.natRules).to.have.length(1);
+      });
+
+      it('does not re-read when the rule was already gone', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findNatRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.nat.remove').execute(
+          input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: 'nunca-existio' }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('operations that deliberately do not re-read', () => {
+      beforeEach(async () => {
+        await fakeClient.createNatRule({
+          action: 'dst-nat',
+          chain: 'dstnat',
+          comment: `cuzonet:firewall-nat:${REFERENCE}`,
+          toAddresses: '192.168.1.50',
+        });
+      });
+
+      const CASES = [
+        ['update', { toPorts: '8081' }],
+        ['enable', {}],
+        ['disable', {}],
+      ] as const;
+
+      it.each(CASES)('%s resolves once and trusts the router confirmation', async (operation, payload) => {
+        const findSpy = vi.spyOn(fakeClient, 'findNatRulesByReference');
+        const actionType = `routeros.firewall.nat.${operation}`;
+
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
 });
