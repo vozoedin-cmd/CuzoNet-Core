@@ -248,7 +248,15 @@ export interface RouterOsFilterRuleOwnership {
 
 export interface ObservedFilterRule {
   readonly id: string;
-  readonly physicalIndex: number;
+  /**
+   * Posición de la regla dentro del listado físicamente ordenado, contando desde 0.
+   *
+   * Solo está presente cuando la regla proviene de un listado completo
+   * (`listFilterRules`, `findFilterRulesByReference`), que es lo único capaz de
+   * determinarla. Una búsqueda por `.id` devuelve una sola fila y no puede saber qué
+   * posición ocupa, así que omite el campo en lugar de inventar un valor.
+   */
+  readonly physicalIndex?: number;
   readonly dynamic: boolean;
   readonly invalid: boolean;
   readonly chain: string;

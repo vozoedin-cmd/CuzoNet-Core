@@ -660,7 +660,9 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
       timeoutMs: this.timeoutMs,
     });
     const reply = replies[0];
-    return reply ? mapReplyToFilterRule(reply, 0) : null;
+    // Sin `physicalIndex`: una consulta por `.id` devuelve una fila suelta y no puede
+    // determinar su posición en la cadena.
+    return reply ? mapReplyToFilterRule(reply) : null;
   }
 
   public async findFilterRulesByReference(ruleReference: string): Promise<ObservedFilterRule[]> {
@@ -1136,11 +1138,11 @@ function mapReplyToAddressListEntry(reply: RouterOSRecord): RouterOsAddressListE
 const FILTER_RULE_PROPLIST =
   '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,disabled,comment,dynamic,invalid,jump-target,reject-with,hotspot,log,log-prefix,address-list,bytes,packets';
 
-function mapReplyToFilterRule(reply: RouterOSRecord, index: number): ObservedFilterRule {
+function mapReplyToFilterRule(reply: RouterOSRecord, index?: number): ObservedFilterRule {
   const comment = reply.comment;
   return {
     id: reply['.id'] ?? '',
-    physicalIndex: index,
+    ...(index !== undefined ? { physicalIndex: index } : {}),
     dynamic: parseRouterOsBoolean(reply.dynamic),
     invalid: parseRouterOsBoolean(reply.invalid),
     chain: reply.chain ?? '',

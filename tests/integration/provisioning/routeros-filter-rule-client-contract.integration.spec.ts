@@ -250,12 +250,8 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
     });
   });
 
-  /**
-   * DIVERGENCIAS CONOCIDAS. Se fijan aqui para que sean visibles y no se descubran de nuevo
-   * en produccion. Ninguna es alcanzable hoy desde una solicitud de aprovisionamiento: ni el
-   * esquema Zod ni el adapter exponen estos campos. Ver el informe.
-   */
-  describe('extended fields and the one remaining known divergence', () => {
+  /** Campos extendidos y semantica de `physicalIndex`, identicos en ambos clientes. */
+  describe('extended fields and positional metadata', () => {
     const EXTENDED_FIELDS = {
       addressList: 'MOROSOS',
       hotspot: 'auth',
@@ -304,7 +300,7 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
       expect(comparableShape(fromFake ?? null)).toEqual(comparableShape(fromLibrary ?? null));
     });
 
-    it('findFilterRuleById: the double reports the real physicalIndex, the library always reports 0', async () => {
+    it('findFilterRuleById omits physicalIndex in both clients', async () => {
       await fake.createFilterRule({ ...SPEC, comment: 'cuzonet:firewall-filter:first' });
       await fake.createFilterRule(SPEC);
       const second = fake.filterRules[1];
@@ -313,8 +309,11 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
       const fromFake = await fake.findFilterRuleById(second?.id ?? '*2');
       const fromLibrary = await viaLibrary((client) => client.findFilterRuleById(second?.id ?? '*2'));
 
-      expect(fromFake?.physicalIndex).toBe(1);
-      expect(fromLibrary?.physicalIndex).toBe(0);
+      // El doble conoce la posicion real, pero la omite igual que el cliente real: la
+      // paridad del contrato pesa mas que el dato extra.
+      expect(fromFake).not.toHaveProperty('physicalIndex');
+      expect(fromLibrary).not.toHaveProperty('physicalIndex');
+      expect(comparableShape(fromFake)).toEqual(comparableShape(fromLibrary));
     });
   });
 });

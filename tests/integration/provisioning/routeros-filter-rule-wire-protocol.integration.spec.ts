@@ -199,16 +199,40 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
     });
 
     /**
-     * DIVERGENCIA CONOCIDA: al resolver por `.id` el cliente mapea con indice 0 fijo, asi
-     * que `physicalIndex` no refleja la posicion real de la regla en la cadena. El doble,
-     * que conoce el array completo, si devuelve la posicion real. Ver el informe.
+     * `physicalIndex` solo tiene sentido derivado de un listado completo. Una consulta por
+     * `.id` devuelve una fila suelta y no puede saber que posicion ocupa en la cadena, asi
+     * que omite el campo en lugar de inventar un cero.
      */
-    it('GAP: findFilterRuleById always reports physicalIndex 0, whatever the real position', async () => {
+    it('findFilterRuleById omits physicalIndex: a single row cannot know its position', async () => {
       harness.existingRecord = { ...managedRule, '.id': '*42' };
 
       const rule = await withClient((client) => client.findFilterRuleById('*42'));
 
-      expect(rule?.physicalIndex).toBe(0);
+      expect(rule).not.toHaveProperty('physicalIndex');
+      expect(rule?.id).toBe('*42');
+    });
+
+    it('a full listing does report physicalIndex for every row', async () => {
+      harness.existingRecords = [
+        { ...managedRule, '.id': '*10' },
+        { ...managedRule, '.id': '*42' },
+      ];
+
+      const rules = await withClient((client) => client.listFilterRules());
+
+      expect(rules.map((rule) => rule.physicalIndex)).toEqual([0, 1]);
+    });
+
+    it('findFilterRulesByReference reports physicalIndex, since it derives from a listing', async () => {
+      harness.existingRecords = [
+        { ...managedRule, '.id': '*10', comment: 'cuzonet:firewall-filter:otra' },
+        { ...managedRule, '.id': '*42' },
+      ];
+
+      const found = await withClient((client) => client.findFilterRulesByReference('block-ssh-wan'));
+
+      expect(found).toHaveLength(1);
+      expect(found[0]?.physicalIndex).toBe(1);
     });
   });
 

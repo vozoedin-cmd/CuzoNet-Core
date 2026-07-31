@@ -668,7 +668,9 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     }
     const rule = this.filterRules[index];
     if (!rule) return null;
-    return this.mapFakeToObservedFilterRule(rule, index);
+    // Espeja al cliente real: una busqueda por `.id` no expone `physicalIndex`, aunque el
+    // doble conozca la posicion. La paridad importa mas que la riqueza del dato.
+    return this.mapFakeToObservedFilterRule(rule);
   }
 
   public async findFilterRulesByReference(ruleReference: string): Promise<ObservedFilterRule[]> {
@@ -692,10 +694,10 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     return matches[0] ?? null; // Si hay múltiples, operamos sobre el primero (o fallamos en el adapter, pero aquí resolvemos uno para compatibilidad con mutaciones previas)
   }
 
-  private mapFakeToObservedFilterRule(r: FakeRouterOsFilterRule, index: number): ObservedFilterRule {
+  private mapFakeToObservedFilterRule(r: FakeRouterOsFilterRule, index?: number): ObservedFilterRule {
     return {
       id: r.id,
-      physicalIndex: index,
+      ...(index !== undefined ? { physicalIndex: index } : {}),
       dynamic: r.dynamic,
       invalid: r.invalid,
       chain: r.chain,
