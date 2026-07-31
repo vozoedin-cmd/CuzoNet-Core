@@ -25,10 +25,10 @@ import type {
   RouterOsFilterRuleCreateData,
   RouterOsFilterRuleMoveTarget,
   RouterOsFilterRuleUpdateData,
-  RouterOsNatRule,
+  ObservedNatRule,
   RouterOsNatRuleCreateData,
+  RouterOsNatRuleLocator,
   RouterOsNatRuleMoveTarget,
-  RouterOsNatRuleReference,
   RouterOsNatRuleUpdateData,
   RouterOsMangleRule,
   RouterOsMangleRuleCreateData,
@@ -68,6 +68,29 @@ export interface FakeRouterOsFilterRule {
   readonly packets: number;
 }
 
+export interface FakeRouterOsNatRule {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly connectionState?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly toAddresses?: string;
+  readonly toPorts?: string;
+  readonly ruleReference?: string;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
   public queues: RouterOsSimpleQueue[] = [];
@@ -76,7 +99,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public hotspotUserProfiles: RouterOsHotspotUserProfile[] = [];
   public addressListEntries: RouterOsAddressListEntry[] = [];
   public filterRules: FakeRouterOsFilterRule[] = [];
-  public natRules: RouterOsNatRule[] = [];
+  public natRules: FakeRouterOsNatRule[] = [];
   public mangleRules: RouterOsMangleRule[] = [];
   private nextId = 1;
 
@@ -807,17 +830,21 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const ruleData: RouterOsNatRule = {
+    const ruleData: FakeRouterOsNatRule = {
       action: rule.action,
+      bytes: 0,
       chain: rule.chain,
       comment: rule.comment,
       ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
       disabled: rule.disabled ?? false,
       ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
       ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      dynamic: false,
       id: `*${this.nextId++}`,
       ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      invalid: false,
       ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      packets: 0,
       ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
       ...(NatRuleComment.extractReference(rule.comment) !== null
         ? { ruleReference: NatRuleComment.extractReference(rule.comment)! }
@@ -830,11 +857,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.insertRuleAt(this.natRules, ruleData, rule.placeBeforeId);
   }
 
-  public async disableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+  public async disableNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findNatRule(reference);
+    const rule = await this.resolveFakeNatRule(locator);
     if (!rule) {
       return;
     }
@@ -842,11 +869,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.natRules[index] = { ...rule, disabled: true };
   }
 
-  public async enableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+  public async enableNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findNatRule(reference);
+    const rule = await this.resolveFakeNatRule(locator);
     if (!rule) {
       return;
     }
@@ -854,32 +881,73 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.natRules[index] = { ...rule, disabled: false };
   }
 
-  public async findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null> {
+  public async findNatRuleById(id: string): Promise<ObservedNatRule | null> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = this.natRules.find(
-      (r) =>
-        (reference.id !== undefined && r.id === reference.id) ||
-        (reference.id === undefined &&
-          reference.ruleReference !== undefined &&
-          r.ruleReference === reference.ruleReference),
-    );
-    return rule ?? null;
+    const rule = this.natRules.find((r) => r.id === id);
+    // Espeja al cliente real: una busqueda por `.id` no expone `physicalIndex`.
+    return rule ? this.mapFakeToObservedNatRule(rule) : null;
   }
 
-  public async listNatRules(): Promise<RouterOsNatRule[]> {
+  public async findNatRulesByReference(ruleReference: string): Promise<ObservedNatRule[]> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    return [...this.natRules];
+    const matches: ObservedNatRule[] = [];
+    this.natRules.forEach((r, index) => {
+      if (r.ruleReference === ruleReference) {
+        matches.push(this.mapFakeToObservedNatRule(r, index));
+      }
+    });
+    return matches;
   }
 
-  public async moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void> {
+  private async resolveFakeNatRule(locator: RouterOsNatRuleLocator): Promise<FakeRouterOsNatRule | null> {
+    if (locator.kind === 'id') {
+      return this.natRules.find((r) => r.id === locator.id) ?? null;
+    }
+    return this.natRules.find((r) => r.ruleReference === locator.ruleReference) ?? null;
+  }
+
+  private mapFakeToObservedNatRule(r: FakeRouterOsNatRule, index?: number): ObservedNatRule {
+    return {
+      id: r.id,
+      ...(index !== undefined ? { physicalIndex: index } : {}),
+      dynamic: r.dynamic,
+      invalid: r.invalid,
+      chain: r.chain,
+      action: r.action,
+      ...(r.comment !== undefined ? { comment: r.comment } : {}),
+      ownership: NatRuleComment.parseOwnership(r.comment),
+      disabled: r.disabled,
+      ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+      ...(r.srcAddress !== undefined ? { srcAddress: r.srcAddress } : {}),
+      ...(r.dstAddress !== undefined ? { dstAddress: r.dstAddress } : {}),
+      ...(r.srcPort !== undefined ? { srcPort: r.srcPort } : {}),
+      ...(r.dstPort !== undefined ? { dstPort: r.dstPort } : {}),
+      ...(r.inInterface !== undefined ? { inInterface: r.inInterface } : {}),
+      ...(r.outInterface !== undefined ? { outInterface: r.outInterface } : {}),
+      ...(r.connectionState !== undefined ? { connectionState: r.connectionState } : {}),
+      ...(r.toAddresses !== undefined ? { toAddresses: r.toAddresses } : {}),
+      ...(r.toPorts !== undefined ? { toPorts: r.toPorts } : {}),
+      bytes: r.bytes,
+      packets: r.packets,
+    };
+  }
+
+  public async listNatRules(): Promise<ObservedNatRule[]> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findNatRule(reference);
+    return this.natRules.map((r, i) => this.mapFakeToObservedNatRule(r, i));
+  }
+
+  public async moveNatRule(locator: RouterOsNatRuleLocator, target: RouterOsNatRuleMoveTarget): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeNatRule(locator);
     if (!rule) {
       return;
     }
@@ -887,27 +955,30 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.insertRuleAt(this.natRules, rule, target.placeBeforeId);
   }
 
-  public async removeNatRule(reference: RouterOsNatRuleReference): Promise<void> {
+  public async removeNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findNatRule(reference);
+    const rule = await this.resolveFakeNatRule(locator);
     if (!rule) {
       return;
     }
     this.natRules = this.natRules.filter((r) => r.id !== rule.id);
   }
 
-  public async updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void> {
+  public async updateNatRule(
+    locator: RouterOsNatRuleLocator,
+    data: RouterOsNatRuleUpdateData,
+  ): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findNatRule(reference);
+    const rule = await this.resolveFakeNatRule(locator);
     if (!rule) {
       return;
     }
     const index = this.natRules.findIndex((r) => r.id === rule.id);
-    const ruleData: RouterOsNatRule = {
+    const ruleData: FakeRouterOsNatRule = {
       ...rule,
       ...(data.action !== undefined ? { action: data.action } : {}),
       ...(data.chain !== undefined ? { chain: data.chain } : {}),

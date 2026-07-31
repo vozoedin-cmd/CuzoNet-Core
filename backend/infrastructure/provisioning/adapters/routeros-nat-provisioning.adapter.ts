@@ -3,7 +3,7 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
-  RouterOsNatRule,
+  ObservedNatRule,
   RouterOsNatRuleCreateData,
   RouterOsNatRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
@@ -90,7 +90,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     this.assertCoherent(desired.chain as NatChainName, desired.action, desired.toAddresses);
     const comment = NatRuleComment.create(ruleReference, command.comment);
 
-    const existing = await client.findNatRule({ ruleReference: ruleReference.value });
+    const existing = (await client.findNatRulesByReference(ruleReference.value))[0];
     if (existing) {
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
@@ -188,7 +188,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
       return ruleReference.value; // Idempotent success: nothing changed
     }
 
-    await client.updateNatRule({ id: existing.id }, updateData);
+    await client.updateNatRule({ kind: 'id', id: existing.id }, updateData);
     return ruleReference.value;
   }
 
@@ -203,7 +203,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     }
 
     await client.moveNatRule(
-      { id: existing.id },
+      { kind: 'id', id: existing.id },
       target.placeBeforeId !== undefined ? { placeBeforeId: target.placeBeforeId } : {},
     );
     return ruleReference.value;
@@ -214,7 +214,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
-    await client.enableNatRule({ id: existing.id });
+    await client.enableNatRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
@@ -223,21 +223,21 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
-    await client.disableNatRule({ id: existing.id });
+    await client.disableNatRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsNatRuleRemoveInput): Promise<string> {
-    const existing = await client.findNatRule({ ruleReference: command.ruleReference });
+    const existing = (await client.findNatRulesByReference(command.ruleReference))[0];
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
-    await client.removeNatRule({ id: existing.id });
+    await client.removeNatRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
-  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<RouterOsNatRule> {
-    const existing = await client.findNatRule({ ruleReference });
+  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedNatRule> {
+    const existing = (await client.findNatRulesByReference(ruleReference))[0];
     if (!existing) {
       throw new RouterOsNatRuleNotFoundError(`Regla NAT no encontrada para la referencia: ${ruleReference}`);
     }
@@ -273,7 +273,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     };
   }
 
-  private isEquivalent(existing: RouterOsNatRule, desired: DesiredNatRuleFields): boolean {
+  private isEquivalent(existing: ObservedNatRule, desired: DesiredNatRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
       existing.action === desired.action &&

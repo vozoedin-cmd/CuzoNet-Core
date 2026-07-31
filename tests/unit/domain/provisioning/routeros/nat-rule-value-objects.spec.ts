@@ -111,4 +111,66 @@ describe('NAT rule value objects', () => {
       expect(() => NatToAddress.create('not-an-address')).to.throw();
     });
   });
+
+  describe('NatRuleComment.parseOwnership', () => {
+    it('reads a valid marker, its reference and the user comment', () => {
+      expect(NatRuleComment.parseOwnership('cuzonet:firewall-nat:port-8080 reenvio web')).to.deep.equal({
+        ruleReference: 'port-8080',
+        status: 'valid',
+        userComment: 'reenvio web',
+      });
+    });
+
+    it('omits userComment when the marker carries nothing else', () => {
+      expect(NatRuleComment.parseOwnership('cuzonet:firewall-nat:port-8080')).to.deep.equal({
+        ruleReference: 'port-8080',
+        status: 'valid',
+      });
+    });
+
+    it('classifies a marker of another CuzoNet resource as foreign', () => {
+      // El ensamblador de Simple Queue usa `cuzonet:resource:`; una regla NAT que lo lleve
+      // no es de este recurso.
+      for (const comment of ['cuzonet:firewall-filter:x', 'cuzonet:resource:123', 'cuzonet:otra']) {
+        expect(NatRuleComment.parseOwnership(comment).status, comment).to.equal('foreign');
+      }
+    });
+
+    it('classifies a marker without a usable reference as malformed', () => {
+      for (const comment of ['cuzonet:firewall-nat:', 'cuzonet:firewall-nat: con espacio']) {
+        expect(NatRuleComment.parseOwnership(comment).status, comment).to.equal('malformed');
+      }
+    });
+
+    it('classifies anything else as unmanaged', () => {
+      for (const comment of ['regla puesta a mano', '', '   ', undefined, null]) {
+        expect(NatRuleComment.parseOwnership(comment).status, String(comment)).to.equal('unmanaged');
+      }
+    });
+
+    it('only the valid status carries a ruleReference', () => {
+      const comments = ['cuzonet:firewall-nat:ok', 'cuzonet:otra', 'cuzonet:firewall-nat:', 'a mano'];
+      const parsed = comments.map((c) => NatRuleComment.parseOwnership(c));
+
+      expect(parsed[0]?.ruleReference).to.equal('ok');
+      for (const entry of parsed.slice(1)) {
+        expect(entry.ruleReference, entry.status).to.equal(undefined);
+      }
+    });
+
+    it('produces exactly the four declared statuses, and no others', () => {
+      const comments = [
+        'cuzonet:firewall-nat:a libre',
+        'cuzonet:firewall-nat:b',
+        'cuzonet:firewall-filter:c',
+        'cuzonet:firewall-nat:',
+        'a mano',
+        ' ',
+      ];
+
+      const statuses = new Set(comments.map((c) => NatRuleComment.parseOwnership(c).status));
+
+      expect([...statuses].sort()).to.deep.equal(['foreign', 'malformed', 'unmanaged', 'valid']);
+    });
+  });
 });

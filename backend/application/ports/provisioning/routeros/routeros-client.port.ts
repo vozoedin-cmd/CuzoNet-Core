@@ -338,65 +338,91 @@ export interface RouterOsFilterRuleMoveTarget {
   readonly placeBeforeId?: string;
 }
 
-export interface RouterOsNatRuleReference {
-  readonly id?: string;
+/**
+ * Clasificación del comentario de una regla NAT respecto a la propiedad de CuzoNet.
+ * Mismos cuatro estados y misma semántica que en Firewall Filter: solo `valid` aporta
+ * `ruleReference`, y por tanto es el único resoluble.
+ */
+export type RouterOsNatRuleOwnershipStatus = 'valid' | 'malformed' | 'foreign' | 'unmanaged';
+
+export interface RouterOsNatRuleOwnership {
+  readonly status: RouterOsNatRuleOwnershipStatus;
   readonly ruleReference?: string;
+  readonly userComment?: string;
 }
 
-export interface RouterOsNatRule {
-  readonly action: string;
-  readonly chain: string;
-  readonly comment?: string;
-  readonly connectionState?: string;
-  readonly disabled: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
+/**
+ * Una regla de `/ip/firewall/nat` tal como se observa en el router.
+ *
+ * `dynamic`, `invalid`, `bytes`, `packets` y `physicalIndex` son de SOLO LECTURA: los
+ * produce el router (o el orden del listado) y no aparecen en los datos de creación ni de
+ * actualización. `dynamic` importa especialmente en NAT: UPnP crea reglas dinámicas de
+ * forma rutinaria en routers de cliente.
+ *
+ * `physicalIndex` solo está presente cuando la regla proviene de un listado completo, que
+ * es lo único capaz de determinarla; una búsqueda por `.id` devuelve una fila suelta y
+ * omite el campo en lugar de inventar un valor.
+ */
+export interface ObservedNatRule {
   readonly id: string;
+  readonly physicalIndex?: number;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly chain: string;
+  readonly action: string;
+  readonly comment?: string;
+  readonly ownership: RouterOsNatRuleOwnership;
+  readonly disabled: boolean;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
   readonly inInterface?: string;
   readonly outInterface?: string;
+  readonly connectionState?: string;
+  readonly toAddresses?: string;
+  readonly toPorts?: string;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
+/** Campos de una regla NAT que CuzoNet administra: los que puede escribir y comparar. */
+export interface ManagedNatRuleSpec {
+  readonly chain: string;
+  readonly action: string;
+  readonly comment: string;
+  readonly disabled?: boolean;
   readonly protocol?: string;
-  readonly ruleReference?: string;
   readonly srcAddress?: string;
+  readonly dstAddress?: string;
   readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly connectionState?: string;
   readonly toAddresses?: string;
   readonly toPorts?: string;
 }
 
-export interface RouterOsNatRuleCreateData {
-  readonly action: string;
-  readonly chain: string;
-  readonly comment: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly inInterface?: string;
-  readonly outInterface?: string;
+export interface RouterOsNatRuleCreateData extends ManagedNatRuleSpec {
   /** .id of the existing rule this one should be inserted before; omit to append at the end. */
   readonly placeBeforeId?: string;
-  readonly protocol?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-  readonly toAddresses?: string;
-  readonly toPorts?: string;
 }
 
-export interface RouterOsNatRuleUpdateData {
-  readonly action?: string;
-  readonly chain?: string;
-  readonly comment?: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly inInterface?: string;
-  readonly outInterface?: string;
-  readonly protocol?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-  readonly toAddresses?: string;
-  readonly toPorts?: string;
+export type RouterOsNatRuleUpdateData = Partial<ManagedNatRuleSpec>;
+
+export interface RouterOsNatRuleIdLocator {
+  readonly kind: 'id';
+  readonly id: string;
 }
+
+export interface RouterOsNatRuleReferenceLocator {
+  readonly kind: 'managed-reference';
+  readonly ruleReference: string;
+}
+
+export type RouterOsNatRuleLocator = RouterOsNatRuleIdLocator | RouterOsNatRuleReferenceLocator;
 
 export interface RouterOsNatRuleMoveTarget {
   /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
@@ -554,14 +580,20 @@ export interface RouterOsClientPort {
   updateFilterRule(locator: RouterOsFilterRuleLocator, data: RouterOsFilterRuleUpdateData): Promise<void>;
 
   createNatRule(rule: RouterOsNatRuleCreateData): Promise<void>;
-  disableNatRule(reference: RouterOsNatRuleReference): Promise<void>;
-  enableNatRule(reference: RouterOsNatRuleReference): Promise<void>;
-  findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null>;
+  disableNatRule(locator: RouterOsNatRuleLocator): Promise<void>;
+  enableNatRule(locator: RouterOsNatRuleLocator): Promise<void>;
+  findNatRuleById(id: string): Promise<ObservedNatRule | null>;
+  /**
+   * Todas las reglas que llevan la referencia administrada. El marcador del comentario no
+   * garantiza unicidad: una duplicación manual o una importación pueden dejar dos. Quien
+   * necesite operar debe exigir exactamente una coincidencia en vez de tomar la primera.
+   */
+  findNatRulesByReference(ruleReference: string): Promise<ObservedNatRule[]>;
   /** Global, physically-ordered listing of all NAT rules (across srcnat and dstnat), used to resolve position/move targets. */
-  listNatRules(): Promise<RouterOsNatRule[]>;
-  moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void>;
-  removeNatRule(reference: RouterOsNatRuleReference): Promise<void>;
-  updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void>;
+  listNatRules(): Promise<ObservedNatRule[]>;
+  moveNatRule(locator: RouterOsNatRuleLocator, target: RouterOsNatRuleMoveTarget): Promise<void>;
+  removeNatRule(locator: RouterOsNatRuleLocator): Promise<void>;
+  updateNatRule(locator: RouterOsNatRuleLocator, data: RouterOsNatRuleUpdateData): Promise<void>;
 
   createMangleRule(rule: RouterOsMangleRuleCreateData): Promise<void>;
   disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;

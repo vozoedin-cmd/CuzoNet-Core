@@ -40,4 +40,36 @@ export class NatRuleComment {
     const match = MARKER_PATTERN.exec(comment);
     return match ? match[1]! : null;
   }
+
+  /**
+   * Clasifica un comentario crudo de RouterOS. Devuelve exactamente cuatro estados; solo
+   * `valid` aporta `ruleReference`, que es lo que hace resoluble a una regla.
+   */
+  public static parseOwnership(comment: string | undefined | null): {
+    status: 'valid' | 'malformed' | 'foreign' | 'unmanaged';
+    ruleReference?: string;
+    userComment?: string;
+  } {
+    if (!comment || comment.trim() === '') {
+      return { status: 'unmanaged' };
+    }
+    const trimmed = comment.trim();
+    if (!trimmed.startsWith('cuzonet:')) {
+      return { status: 'unmanaged' };
+    }
+    if (!trimmed.startsWith(MARKER_PREFIX)) {
+      return { status: 'foreign' };
+    }
+    const match = MARKER_PATTERN.exec(trimmed);
+    if (!match || !match[1]) {
+      return { status: 'malformed' };
+    }
+    const ruleReference = match[1];
+    const userComment = trimmed.substring(match[0].length).trim();
+    return {
+      status: 'valid',
+      ruleReference,
+      ...(userComment ? { userComment } : {}),
+    };
+  }
 }

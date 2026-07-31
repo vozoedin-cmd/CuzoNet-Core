@@ -29,10 +29,10 @@ import type {
   RouterOsFilterRuleCreateData,
   RouterOsFilterRuleMoveTarget,
   RouterOsFilterRuleUpdateData,
-  RouterOsNatRule,
+  ObservedNatRule,
   RouterOsNatRuleCreateData,
+  RouterOsNatRuleLocator,
   RouterOsNatRuleMoveTarget,
-  RouterOsNatRuleReference,
   RouterOsNatRuleUpdateData,
   RouterOsMangleRule,
   RouterOsMangleRuleCreateData,
@@ -775,8 +775,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async disableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
-    const rule = await this.findNatRule(reference);
+  public async disableNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
+    const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/nat/disable', {
@@ -785,8 +785,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async enableNatRule(reference: RouterOsNatRuleReference): Promise<void> {
-    const rule = await this.findNatRule(reference);
+  public async enableNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
+    const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/nat/enable', {
@@ -795,35 +795,41 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async findNatRule(reference: RouterOsNatRuleReference): Promise<RouterOsNatRule | null> {
-    if (reference.id === undefined && reference.ruleReference === undefined) {
-      return null;
-    }
-
-    if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/nat', {
-        attributes: { '.proplist': NAT_RULE_PROPLIST },
-        queries: [`?.id=${reference.id}`],
-        timeoutMs: this.timeoutMs,
-      });
-      const reply = replies[0];
-      return reply ? mapReplyToNatRule(reply) : null;
-    }
-
-    const rules = await this.listNatRules();
-    return rules.find((rule) => rule.ruleReference === reference.ruleReference) ?? null;
+  public async findNatRuleById(id: string): Promise<ObservedNatRule | null> {
+    const replies = await this.client.print('/ip/firewall/nat', {
+      attributes: { '.proplist': NAT_RULE_PROPLIST },
+      queries: [`?.id=${id}`],
+      timeoutMs: this.timeoutMs,
+    });
+    const reply = replies[0];
+    // Sin `physicalIndex`: una consulta por `.id` devuelve una fila suelta y no puede
+    // determinar su posicion en la cadena.
+    return reply ? mapReplyToNatRule(reply) : null;
   }
 
-  public async listNatRules(): Promise<RouterOsNatRule[]> {
+  public async findNatRulesByReference(ruleReference: string): Promise<ObservedNatRule[]> {
+    const rules = await this.listNatRules();
+    return rules.filter((rule) => rule.ownership.ruleReference === ruleReference);
+  }
+
+  public async listNatRules(): Promise<ObservedNatRule[]> {
     const replies = await this.client.print('/ip/firewall/nat', {
       attributes: { '.proplist': NAT_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
-    return replies.map(mapReplyToNatRule);
+    return replies.map((reply, i) => mapReplyToNatRule(reply, i));
   }
 
-  public async moveNatRule(reference: RouterOsNatRuleReference, target: RouterOsNatRuleMoveTarget): Promise<void> {
-    const rule = await this.findNatRule(reference);
+  private async resolveNatRule(locator: RouterOsNatRuleLocator): Promise<ObservedNatRule | null> {
+    if (locator.kind === 'id') {
+      return this.findNatRuleById(locator.id);
+    }
+    const matches = await this.findNatRulesByReference(locator.ruleReference);
+    return matches[0] ?? null;
+  }
+
+  public async moveNatRule(locator: RouterOsNatRuleLocator, target: RouterOsNatRuleMoveTarget): Promise<void> {
+    const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
     let destination = target.placeBeforeId;
@@ -838,8 +844,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async removeNatRule(reference: RouterOsNatRuleReference): Promise<void> {
-    const rule = await this.findNatRule(reference);
+  public async removeNatRule(locator: RouterOsNatRuleLocator): Promise<void> {
+    const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/nat/remove', {
@@ -848,8 +854,11 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async updateNatRule(reference: RouterOsNatRuleReference, data: RouterOsNatRuleUpdateData): Promise<void> {
-    const rule = await this.findNatRule(reference);
+  public async updateNatRule(
+    locator: RouterOsNatRuleLocator,
+    data: RouterOsNatRuleUpdateData,
+  ): Promise<void> {
+    const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
     const attributes: Record<string, string> = { numbers: rule.id };
@@ -1170,28 +1179,32 @@ function mapReplyToFilterRule(reply: RouterOSRecord, index?: number): ObservedFi
 }
 
 const NAT_RULE_PROPLIST =
-  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,to-addresses,to-ports,disabled,comment';
+  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,to-addresses,to-ports,disabled,comment,dynamic,invalid,bytes,packets';
 
-function mapReplyToNatRule(reply: RouterOSRecord): RouterOsNatRule {
-  const comment = reply.comment ?? '';
-  const ruleReference = NatRuleComment.extractReference(comment);
+function mapReplyToNatRule(reply: RouterOSRecord, index?: number): ObservedNatRule {
+  const comment = reply.comment;
   return {
-    action: reply.action ?? '',
-    chain: reply.chain ?? '',
-    comment,
-    ...(reply['connection-state'] ? { connectionState: reply['connection-state'] } : {}),
-    disabled: reply.disabled === 'true',
-    ...(reply['dst-address'] ? { dstAddress: reply['dst-address'] } : {}),
-    ...(reply['dst-port'] ? { dstPort: reply['dst-port'] } : {}),
     id: reply['.id'] ?? '',
-    ...(reply['in-interface'] ? { inInterface: reply['in-interface'] } : {}),
-    ...(reply['out-interface'] ? { outInterface: reply['out-interface'] } : {}),
-    ...(reply.protocol ? { protocol: reply.protocol } : {}),
-    ...(ruleReference !== null ? { ruleReference } : {}),
-    ...(reply['src-address'] ? { srcAddress: reply['src-address'] } : {}),
-    ...(reply['src-port'] ? { srcPort: reply['src-port'] } : {}),
-    ...(reply['to-addresses'] ? { toAddresses: reply['to-addresses'] } : {}),
-    ...(reply['to-ports'] ? { toPorts: reply['to-ports'] } : {}),
+    ...(index !== undefined ? { physicalIndex: index } : {}),
+    dynamic: parseRouterOsBoolean(reply.dynamic),
+    invalid: parseRouterOsBoolean(reply.invalid),
+    chain: reply.chain ?? '',
+    action: reply.action ?? '',
+    ...(comment !== undefined ? { comment } : {}),
+    ownership: NatRuleComment.parseOwnership(comment),
+    disabled: parseRouterOsBoolean(reply.disabled),
+    ...(reply.protocol !== undefined ? { protocol: reply.protocol } : {}),
+    ...(reply['src-address'] !== undefined ? { srcAddress: reply['src-address'] } : {}),
+    ...(reply['dst-address'] !== undefined ? { dstAddress: reply['dst-address'] } : {}),
+    ...(reply['src-port'] !== undefined ? { srcPort: reply['src-port'] } : {}),
+    ...(reply['dst-port'] !== undefined ? { dstPort: reply['dst-port'] } : {}),
+    ...(reply['in-interface'] !== undefined ? { inInterface: reply['in-interface'] } : {}),
+    ...(reply['out-interface'] !== undefined ? { outInterface: reply['out-interface'] } : {}),
+    ...(reply['connection-state'] !== undefined ? { connectionState: reply['connection-state'] } : {}),
+    ...(reply['to-addresses'] !== undefined ? { toAddresses: reply['to-addresses'] } : {}),
+    ...(reply['to-ports'] !== undefined ? { toPorts: reply['to-ports'] } : {}),
+    bytes: reply.bytes ? parseInt(reply.bytes, 10) || 0 : 0,
+    packets: reply.packets ? parseInt(reply.packets, 10) || 0 : 0,
   };
 }
 

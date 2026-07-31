@@ -44,8 +44,8 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:shared-ref' });
     const created = client.natRules[0]!;
 
-    expect(await client.findNatRule({ ruleReference: 'shared-ref' })).to.include({ id: created.id });
-    expect(await client.findNatRule({ id: created.id })).to.include({ ruleReference: 'shared-ref' });
+    expect((await client.findNatRulesByReference('shared-ref'))[0]).to.include({ id: created.id });
+    expect((await client.findNatRuleById(created.id))?.ownership.ruleReference).to.equal('shared-ref');
     expect(client.filterRules).to.have.length(1);
     expect(client.natRules).to.have.length(1);
   });
@@ -69,10 +69,10 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r1' });
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r2' });
 
-    await client.disableNatRule({ ruleReference: 'r1' });
+    await client.disableNatRule({ kind: 'managed-reference', ruleReference: 'r1' });
     expect(client.natRules.map((r) => r.disabled)).to.deep.equal([true, false]);
 
-    await client.enableNatRule({ ruleReference: 'r1' });
+    await client.enableNatRule({ kind: 'managed-reference', ruleReference: 'r1' });
     expect(client.natRules[0]?.disabled).to.equal(false);
   });
 
@@ -80,7 +80,7 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'dst-nat', chain: 'dstnat', comment: 'cuzonet:firewall-nat:r1' });
     await client.createNatRule({ action: 'dst-nat', chain: 'dstnat', comment: 'cuzonet:firewall-nat:r2' });
 
-    await client.updateNatRule({ ruleReference: 'r1' }, { toAddresses: '10.0.0.5' });
+    await client.updateNatRule({ kind: 'managed-reference', ruleReference: 'r1' }, { toAddresses: '10.0.0.5' });
 
     expect(client.natRules[0]).to.include({ ruleReference: 'r1', toAddresses: '10.0.0.5' });
     expect(client.natRules.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r2']);
@@ -92,7 +92,7 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r3' });
     const r1Id = client.natRules[0]!.id;
 
-    await client.moveNatRule({ ruleReference: 'r3' }, { placeBeforeId: r1Id });
+    await client.moveNatRule({ kind: 'managed-reference', ruleReference: 'r3' }, { placeBeforeId: r1Id });
 
     expect(client.natRules.map((r) => r.ruleReference)).to.deep.equal(['r3', 'r1', 'r2']);
   });
@@ -101,7 +101,7 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r1' });
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r2' });
 
-    await client.moveNatRule({ ruleReference: 'r1' }, {});
+    await client.moveNatRule({ kind: 'managed-reference', ruleReference: 'r1' }, {});
 
     expect(client.natRules.map((r) => r.ruleReference)).to.deep.equal(['r2', 'r1']);
   });
@@ -109,7 +109,7 @@ describe('FakeRouterOsClient NAT rules', () => {
   it('removes a rule', async () => {
     await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r1' });
 
-    await client.removeNatRule({ ruleReference: 'r1' });
+    await client.removeNatRule({ kind: 'managed-reference', ruleReference: 'r1' });
 
     expect(client.natRules).to.have.length(0);
   });
@@ -119,11 +119,11 @@ describe('FakeRouterOsClient NAT rules', () => {
     await client.createNatRule({ action: 'dst-nat', chain: 'dstnat', comment: 'cuzonet:firewall-nat:r2' });
 
     const listed = await client.listNatRules();
-    expect(listed.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r2']);
+    expect(listed.map((r) => r.ownership.ruleReference)).to.deep.equal(['r1', 'r2']);
   });
 
   it('no-ops enable/disable/remove/update/move when the rule does not exist', async () => {
-    const missing = { ruleReference: 'missing' };
+    const missing = { kind: 'managed-reference', ruleReference: 'missing' } as const;
     await expect(client.disableNatRule(missing)).resolves.toBeUndefined();
     await expect(client.enableNatRule(missing)).resolves.toBeUndefined();
     await expect(client.removeNatRule(missing)).resolves.toBeUndefined();
@@ -137,6 +137,81 @@ describe('FakeRouterOsClient NAT rules', () => {
     await expect(
       client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:r1' }),
     ).rejects.toThrow('Client is closed');
-    await expect(client.findNatRule({ ruleReference: 'r1' })).rejects.toThrow('Client is closed');
+    await expect(client.findNatRulesByReference('r1')).rejects.toThrow('Client is closed');
+  });
+
+  describe('observed shape', () => {
+    const REFERENCE = 'port-8080';
+
+    beforeEach(async () => {
+      await client.createNatRule({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        comment: `cuzonet:firewall-nat:${REFERENCE} reenvio web`,
+        dstPort: '8080',
+        protocol: 'tcp',
+        toAddresses: '192.168.1.50',
+        toPorts: '80',
+      });
+    });
+
+    it('exposes structured ownership instead of a flat ruleReference', async () => {
+      const [observed] = await client.listNatRules();
+
+      expect(observed?.ownership).to.deep.equal({
+        ruleReference: REFERENCE,
+        status: 'valid',
+        userComment: 'reenvio web',
+      });
+      expect(observed).not.to.have.property('ruleReference');
+    });
+
+    it('reports the NAT-specific toAddresses and toPorts', async () => {
+      const [observed] = await client.listNatRules();
+
+      expect(observed).to.include({ toAddresses: '192.168.1.50', toPorts: '80' });
+    });
+
+    it('defaults the router-owned observation fields for a rule CuzoNet created', async () => {
+      const [observed] = await client.listNatRules();
+
+      expect(observed).to.include({ bytes: 0, disabled: false, dynamic: false, invalid: false, packets: 0 });
+    });
+
+    it('reports physicalIndex from a listing but omits it on a lookup by id', async () => {
+      await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:second' });
+      const listed = await client.listNatRules();
+      expect(listed.map((r) => r.physicalIndex)).to.deep.equal([0, 1]);
+
+      const byId = await client.findNatRuleById(listed[1]!.id);
+      expect(byId).not.to.have.property('physicalIndex');
+    });
+
+    it('findNatRulesByReference returns every match, not just the first', async () => {
+      await client.createNatRule({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        comment: `cuzonet:firewall-nat:${REFERENCE} duplicada`,
+      });
+
+      const matches = await client.findNatRulesByReference(REFERENCE);
+
+      expect(matches).to.have.length(2);
+      expect(matches.map((r) => r.physicalIndex)).to.deep.equal([0, 1]);
+    });
+
+    it('returns an empty array when no rule carries the reference', async () => {
+      expect(await client.findNatRulesByReference('no-existe')).to.deep.equal([]);
+    });
+
+    it('classifies a rule CuzoNet never created as unmanaged, with no reference', async () => {
+      await client.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'puesta a mano' });
+
+      const [, foreign] = await client.listNatRules();
+
+      expect(foreign?.ownership.status).to.equal('unmanaged');
+      expect(foreign?.ownership.ruleReference).to.equal(undefined);
+      expect(await client.findNatRulesByReference('puesta a mano')).to.deep.equal([]);
+    });
   });
 });

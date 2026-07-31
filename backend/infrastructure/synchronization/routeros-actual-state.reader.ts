@@ -6,7 +6,7 @@ import type {
   RouterOsClientPort,
   ObservedFilterRule,
   RouterOsMangleRule,
-  RouterOsNatRule,
+  ObservedNatRule,
   RouterOsSimpleQueue,
 } from '../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../application/ports/provisioning/routeros/secret-provider.port.js';
@@ -86,7 +86,7 @@ function normalizeFilterRule(rule: ObservedFilterRule): NormalizedResourceRecord
   };
 }
 
-function normalizeNatRule(rule: RouterOsNatRule): NormalizedResourceRecord {
+function normalizeNatRule(rule: ObservedNatRule): NormalizedResourceRecord {
   return {
     disabled: rule.disabled,
     fields: pickRuleFields(rule, RULE_FIELD_NAMES['nat-rule']),
