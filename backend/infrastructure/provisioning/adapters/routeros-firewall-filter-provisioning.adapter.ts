@@ -20,7 +20,9 @@ import { FirewallChain } from '../../../domain/provisioning/routeros/value-objec
 import { InterfaceName } from '../../../domain/provisioning/routeros/value-objects/interface-name.js';
 import { PortSpecification } from '../../../domain/provisioning/routeros/value-objects/port-specification.js';
 import { Protocol } from '../../../domain/provisioning/routeros/value-objects/protocol.js';
+import { RouterOsFilterRuleAmbiguousError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-ambiguous.error.js';
 import { RouterOsFilterRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-conflict.error.js';
+import { RouterOsFilterRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-dynamic.error.js';
 import { RouterOsFilterRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-not-found.error.js';
 import { RouterOsInvalidFilterRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-filter-rule.error.js';
 import {
@@ -125,9 +127,11 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     const desired = this.buildDesiredFields(command);
     const comment = FilterRuleComment.create(ruleReference, command.comment);
 
-    const existingMatches = await client.findFilterRulesByReference(ruleReference.value);
-    const existing = existingMatches[0];
+    const existing = await this.resolveSingle(client, ruleReference.value);
     if (existing) {
+      // Una regla dinamica ocupa la referencia pero no es administrable: no puede
+      // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
+      this.assertNotDynamic(existing, ruleReference.value);
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
       }
@@ -161,6 +165,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   private async handleUpdate(client: RouterOsClientPort, command: RouterOsFilterRuleUpdateInput): Promise<string> {
     const ruleReference = FilterRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const updateData: MutableFilterRuleUpdateData = {};
     if (command.chain !== undefined) {
@@ -222,6 +227,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   private async handleMove(client: RouterOsClientPort, command: RouterOsFilterRuleMoveInput): Promise<string> {
     const ruleReference = FilterRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const rules = await client.listFilterRules();
     const target = resolveMoveTarget(rules, existing.id, command.position);
@@ -238,6 +244,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
 
   private async handleEnable(client: RouterOsClientPort, command: RouterOsFilterRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
@@ -247,6 +254,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
 
   private async handleDisable(client: RouterOsClientPort, command: RouterOsFilterRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
@@ -255,22 +263,59 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsFilterRuleRemoveInput): Promise<string> {
-    const existingMatches = await client.findFilterRulesByReference(command.ruleReference);
-    const existing = existingMatches[0];
+    const existing = await this.resolveSingle(client, command.ruleReference);
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
+    this.assertNotDynamic(existing, command.ruleReference);
     await client.removeFilterRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
   private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedFilterRule> {
-    const existingMatches = await client.findFilterRulesByReference(ruleReference);
-    const existing = existingMatches[0];
+    const existing = await this.resolveSingle(client, ruleReference);
     if (!existing) {
       throw new RouterOsFilterRuleNotFoundError(`Regla no encontrada para la referencia: ${ruleReference}`);
     }
     return existing;
+  }
+
+  /**
+   * Resuelve una referencia administrada exigiendo como maximo una coincidencia.
+   *
+   * RouterOS no impone unicidad sobre el marcador del comentario, asi que dos reglas pueden
+   * compartir referencia tras una duplicacion manual o una importacion. Quedarse con la
+   * primera dejaria la gemela intacta e informaria exito igualmente.
+   */
+  private async resolveSingle(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<ObservedFilterRule | null> {
+    const matches = await client.findFilterRulesByReference(ruleReference);
+    if (matches.length > 1) {
+      throw new RouterOsFilterRuleAmbiguousError(
+        `La referencia ${ruleReference} resuelve a ${matches.length} reglas en el router ` +
+          `(${matches.map((rule) => rule.id).join(', ')}). No se opera sobre una eleccion ` +
+          'arbitraria: resuelva la duplicidad en el router antes de reintentar.',
+      );
+    }
+    return matches[0] ?? null;
+  }
+
+  /**
+   * Las reglas `dynamic=true` las gobierna RouterOS (Hotspot, IPsec y similares): no se
+   * guardan en la configuracion y desapareceran solas. Se pueden observar, pero mutarlas
+   * produciria un cambio que no perdura, asi que la guarda corta antes de enviar comando.
+   */
+  private assertNotDynamic(rule: ObservedFilterRule, ruleReference: string): void {
+    if (!rule.dynamic) {
+      return;
+    }
+    throw new RouterOsFilterRuleDynamicError(
+      `La regla ${ruleReference} (${rule.id}) es dinamica y la administra RouterOS, no ` +
+        'CuzoNet. Las reglas dinamicas no se pueden crear, modificar, mover, habilitar, ' +
+        'deshabilitar ni eliminar desde el aprovisionamiento.',
+    );
   }
 
   private buildDesiredFields(command: RouterOsFilterRuleAddInput): DesiredFilterRuleFields {
@@ -316,6 +361,20 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (error instanceof RouterOsFilterRuleConflictError) {
       return {
         errorCode: 'ROUTEROS_FILTER_RULE_CONFLICT',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsFilterRuleAmbiguousError) {
+      return {
+        errorCode: 'ROUTEROS_FILTER_RULE_AMBIGUOUS',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsFilterRuleDynamicError) {
+      return {
+        errorCode: 'ROUTEROS_FILTER_RULE_DYNAMIC',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };

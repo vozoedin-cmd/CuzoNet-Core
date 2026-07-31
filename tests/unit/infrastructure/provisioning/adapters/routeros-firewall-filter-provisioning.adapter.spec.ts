@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import type { ProvisioningActionInput } from '../../../../../backend/application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
@@ -361,6 +361,156 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       );
 
       expect(result.outcome).to.equal('success');
+    });
+  });
+
+  /**
+   * RouterOS no impone unicidad sobre el marcador del comentario: dos reglas pueden
+   * compartir referencia tras una duplicacion manual en WinBox o una importacion de
+   * configuracion. Operar sobre la primera dejaria la gemela intacta e informaria exito.
+   */
+  describe('ambiguous managed reference', () => {
+    const REFERENCE = 'block-ssh-wan';
+    const BASE = {
+      action: 'drop',
+      chain: 'input',
+      comment: `cuzonet:firewall-filter:${REFERENCE} bloqueo SSH`,
+    } as const;
+
+    beforeEach(async () => {
+      await fakeClient.createFilterRule(BASE);
+      await fakeClient.createFilterRule(BASE);
+      expect(fakeClient.filterRules).to.have.length(2);
+    });
+
+    const OPERATIONS = [
+      ['add', 'createFilterRule', { action: 'drop', chain: 'input' }],
+      ['update', 'updateFilterRule', { protocol: 'udp' }],
+      ['move', 'moveFilterRule', { position: 0 }],
+      ['enable', 'enableFilterRule', {}],
+      ['disable', 'disableFilterRule', {}],
+      ['remove', 'removeFilterRule', {}],
+    ] as const;
+
+    it.each(OPERATIONS)('%s fails with AMBIGUOUS and never touches the router', async (operation, clientMethod, payload) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.filter.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_AMBIGUOUS');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(fakeClient.filterRules).to.have.length(2);
+    });
+
+    it('names every candidate id so the operator can resolve it on the router', async () => {
+      const ids = fakeClient.filterRules.map((rule) => rule.id);
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain(REFERENCE);
+        for (const id of ids) expect(result.errorMessage).to.contain(id);
+      }
+    });
+
+    it('does not affect a different reference that resolves to a single rule', async () => {
+      await fakeClient.createFilterRule({
+        action: 'accept',
+        chain: 'input',
+        comment: 'cuzonet:firewall-filter:allow-lan',
+      });
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: 'allow-lan' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules).to.have.length(2);
+    });
+  });
+
+  /**
+   * Las reglas dinamicas las genera RouterOS (Hotspot, IPsec) y desapareceran solas. El
+   * router acepta algunos de estos comandos; la guarda es una decision de CuzoNet, porque
+   * mutar algo efimero informa de un cambio que no perdura.
+   */
+  describe('dynamic rule guard', () => {
+    const REFERENCE = 'hotspot-generated';
+
+    beforeEach(async () => {
+      await fakeClient.createFilterRule({
+        action: 'accept',
+        chain: 'forward',
+        comment: `cuzonet:firewall-filter:${REFERENCE}`,
+      });
+      const rule = fakeClient.filterRules[0]!;
+      fakeClient.filterRules[0] = { ...rule, dynamic: true };
+    });
+
+    const OPERATIONS = [
+      ['add', 'createFilterRule', { action: 'accept', chain: 'forward' }],
+      ['update', 'updateFilterRule', { protocol: 'udp' }],
+      ['move', 'moveFilterRule', { position: 0 }],
+      ['enable', 'enableFilterRule', {}],
+      ['disable', 'disableFilterRule', {}],
+      ['remove', 'removeFilterRule', {}],
+    ] as const;
+
+    it.each(OPERATIONS)('%s fails with DYNAMIC and never touches the router', async (operation, clientMethod, payload) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.filter.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_DYNAMIC');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(fakeClient.filterRules[0]?.dynamic).to.equal(true);
+    });
+
+    it('a dynamic rule can still be observed, only not mutated', async () => {
+      const [observed] = await fakeClient.findFilterRulesByReference(REFERENCE);
+
+      expect(observed?.dynamic).to.equal(true);
+      expect(observed?.ownership.ruleReference).to.equal(REFERENCE);
+    });
+
+    it('still reports NOT_FOUND, not DYNAMIC, when no rule carries the reference', async () => {
+      const result = await adapterFor('routeros.firewall.filter.enable').execute(
+        input('routeros.firewall.filter.enable', { routerId: 'router-1', ruleReference: 'no-existe' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_NOT_FOUND');
+      }
+    });
+
+    it('leaves a static rule with a different reference fully operable', async () => {
+      await fakeClient.createFilterRule({
+        action: 'drop',
+        chain: 'input',
+        comment: 'cuzonet:firewall-filter:static-one',
+      });
+
+      const result = await adapterFor('routeros.firewall.filter.disable').execute(
+        input('routeros.firewall.filter.disable', { routerId: 'router-1', ruleReference: 'static-one' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules.find((r) => r.ruleReference === 'static-one')?.disabled).to.equal(true);
     });
   });
 
