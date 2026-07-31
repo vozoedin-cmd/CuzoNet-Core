@@ -177,7 +177,17 @@ describe('RouterOsMangleProvisioningAdapter', () => {
       expect(fakeClient.mangleRules.map((r) => r.ruleReference)).to.deep.equal(['r1', 'r0', 'r2']);
     });
 
-    it('is idempotent when an equivalent rule already exists', async () => {
+    /**
+     * DEFECTO CONOCIDO, ahora observable. El doble materializa `passthrough` con el default
+     * que RouterOS 7.21.4 aplica de verdad (`true`), asi que `isEquivalent` compara
+     * `true === undefined` y declara conflicto donde deberia ver idempotencia.
+     *
+     * Antes de esta fase el doble omitia `passthrough` cuando no se le pasaba, la
+     * comparacion cuadraba y NINGUNA prueba podia ver el fallo — mientras que contra el
+     * router real habria fallado siempre. La correccion de `isEquivalent` corresponde a la
+     * Fase 4; esta prueba fija el estado actual para que el cambio sea visible en el diff.
+     */
+    it('GAP: an equivalent rule is reported as a conflict because passthrough is not defaulted', async () => {
       await fakeClient.createMangleRule({
         action: 'mark-connection',
         chain: 'prerouting',
@@ -191,6 +201,33 @@ describe('RouterOsMangleProvisioningAdapter', () => {
           action: 'mark-connection',
           chain: 'prerouting',
           newConnectionMark: 'voip-conn',
+          routerId: 'router-1',
+          ruleReference: 'mark-voip-conn',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_MANGLE_RULE_CONFLICT');
+      }
+      expect(fakeClient.mangleRules).to.have.length(1);
+    });
+
+    it('is idempotent when the caller states passthrough explicitly, matching the router default', async () => {
+      await fakeClient.createMangleRule({
+        action: 'mark-connection',
+        chain: 'prerouting',
+        comment: 'cuzonet:firewall-mangle:mark-voip-conn',
+        newConnectionMark: 'voip-conn',
+      });
+      const adapter = adapterFor('routeros.firewall.mangle.add');
+
+      const result = await adapter.execute(
+        input('routeros.firewall.mangle.add', {
+          action: 'mark-connection',
+          chain: 'prerouting',
+          newConnectionMark: 'voip-conn',
+          passthrough: true,
           routerId: 'router-1',
           ruleReference: 'mark-voip-conn',
         }),

@@ -5,7 +5,7 @@ import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
   ObservedFilterRule,
-  RouterOsMangleRule,
+  ObservedMangleRule,
   ObservedNatRule,
   RouterOsSimpleQueue,
 } from '../../application/ports/provisioning/routeros/routeros-client.port.js';
@@ -94,7 +94,7 @@ function normalizeNatRule(rule: ObservedNatRule): NormalizedResourceRecord {
   };
 }
 
-function normalizeMangleRule(rule: RouterOsMangleRule): NormalizedResourceRecord {
+function normalizeMangleRule(rule: ObservedMangleRule): NormalizedResourceRecord {
   return {
     disabled: rule.disabled,
     fields: pickRuleFields(rule, RULE_FIELD_NAMES['mangle-rule']),

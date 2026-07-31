@@ -34,13 +34,14 @@ import type {
   RouterOsNatRuleLocator,
   RouterOsNatRuleMoveTarget,
   RouterOsNatRuleUpdateData,
-  RouterOsMangleRule,
+  ObservedMangleRule,
   RouterOsMangleRuleCreateData,
+  RouterOsMangleRuleLocator,
   RouterOsMangleRuleMoveTarget,
-  RouterOsMangleRuleReference,
   RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
+import { ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 import { logger } from '../../logging/logger.js';
@@ -915,8 +916,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
-    const rule = await this.findMangleRule(reference);
+  public async disableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
+    const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/mangle/disable', {
@@ -925,8 +926,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async enableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
-    const rule = await this.findMangleRule(reference);
+  public async enableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
+    const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/mangle/enable', {
@@ -935,38 +936,44 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async findMangleRule(reference: RouterOsMangleRuleReference): Promise<RouterOsMangleRule | null> {
-    if (reference.id === undefined && reference.ruleReference === undefined) {
-      return null;
-    }
-
-    if (reference.id !== undefined) {
-      const replies = await this.client.print('/ip/firewall/mangle', {
-        attributes: { '.proplist': MANGLE_RULE_PROPLIST },
-        queries: [`?.id=${reference.id}`],
-        timeoutMs: this.timeoutMs,
-      });
-      const reply = replies[0];
-      return reply ? mapReplyToMangleRule(reply) : null;
-    }
-
-    const rules = await this.listMangleRules();
-    return rules.find((rule) => rule.ruleReference === reference.ruleReference) ?? null;
+  public async findMangleRuleById(id: string): Promise<ObservedMangleRule | null> {
+    const replies = await this.client.print('/ip/firewall/mangle', {
+      attributes: { '.proplist': MANGLE_RULE_PROPLIST },
+      queries: [`?.id=${id}`],
+      timeoutMs: this.timeoutMs,
+    });
+    const reply = replies[0];
+    // Sin `physicalIndex`: una consulta por `.id` devuelve una fila suelta y no puede
+    // determinar su posicion en la cadena.
+    return reply ? mapReplyToMangleRule(reply) : null;
   }
 
-  public async listMangleRules(): Promise<RouterOsMangleRule[]> {
+  public async findMangleRulesByReference(ruleReference: string): Promise<ObservedMangleRule[]> {
+    const rules = await this.listMangleRules();
+    return rules.filter((rule) => rule.ownership.ruleReference === ruleReference);
+  }
+
+  public async listMangleRules(): Promise<ObservedMangleRule[]> {
     const replies = await this.client.print('/ip/firewall/mangle', {
       attributes: { '.proplist': MANGLE_RULE_PROPLIST },
       timeoutMs: this.timeoutMs,
     });
-    return replies.map(mapReplyToMangleRule);
+    return replies.map((reply, i) => mapReplyToMangleRule(reply, i));
+  }
+
+  private async resolveMangleRule(locator: RouterOsMangleRuleLocator): Promise<ObservedMangleRule | null> {
+    if (locator.kind === 'id') {
+      return this.findMangleRuleById(locator.id);
+    }
+    const matches = await this.findMangleRulesByReference(locator.ruleReference);
+    return matches[0] ?? null;
   }
 
   public async moveMangleRule(
-    reference: RouterOsMangleRuleReference,
+    locator: RouterOsMangleRuleLocator,
     target: RouterOsMangleRuleMoveTarget,
   ): Promise<void> {
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
     let destination = target.placeBeforeId;
@@ -981,8 +988,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
-  public async removeMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
-    const rule = await this.findMangleRule(reference);
+  public async removeMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
+    const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
     await this.client.execute('/ip/firewall/mangle/remove', {
@@ -992,10 +999,10 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
   }
 
   public async updateMangleRule(
-    reference: RouterOsMangleRuleReference,
+    locator: RouterOsMangleRuleLocator,
     data: RouterOsMangleRuleUpdateData,
   ): Promise<void> {
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
     const attributes: Record<string, string> = { numbers: rule.id };
@@ -1209,32 +1216,41 @@ function mapReplyToNatRule(reply: RouterOSRecord, index?: number): ObservedNatRu
 }
 
 const MANGLE_RULE_PROPLIST =
-  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,connection-mark,packet-mark,routing-mark,new-connection-mark,new-packet-mark,new-routing-mark,passthrough,disabled,comment';
+  '.id,chain,action,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,connection-state,connection-mark,packet-mark,routing-mark,new-connection-mark,new-packet-mark,new-routing-mark,passthrough,disabled,comment,dynamic,invalid,bytes,packets';
 
-function mapReplyToMangleRule(reply: RouterOSRecord): RouterOsMangleRule {
-  const comment = reply.comment ?? '';
-  const ruleReference = MangleRuleComment.extractReference(comment);
+function mapReplyToMangleRule(reply: RouterOSRecord, index?: number): ObservedMangleRule {
+  const comment = reply.comment;
   return {
-    action: reply.action ?? '',
-    chain: reply.chain ?? '',
-    comment,
-    ...(reply['connection-mark'] ? { connectionMark: reply['connection-mark'] } : {}),
-    ...(reply['connection-state'] ? { connectionState: reply['connection-state'] } : {}),
-    disabled: reply.disabled === 'true',
-    ...(reply['dst-address'] ? { dstAddress: reply['dst-address'] } : {}),
-    ...(reply['dst-port'] ? { dstPort: reply['dst-port'] } : {}),
     id: reply['.id'] ?? '',
-    ...(reply['in-interface'] ? { inInterface: reply['in-interface'] } : {}),
-    ...(reply['new-connection-mark'] ? { newConnectionMark: reply['new-connection-mark'] } : {}),
-    ...(reply['new-packet-mark'] ? { newPacketMark: reply['new-packet-mark'] } : {}),
-    ...(reply['new-routing-mark'] ? { newRoutingMark: reply['new-routing-mark'] } : {}),
-    ...(reply['out-interface'] ? { outInterface: reply['out-interface'] } : {}),
-    ...(reply['packet-mark'] ? { packetMark: reply['packet-mark'] } : {}),
-    ...(reply.passthrough !== undefined ? { passthrough: reply.passthrough === 'true' } : {}),
-    ...(reply.protocol ? { protocol: reply.protocol } : {}),
-    ...(reply['routing-mark'] ? { routingMark: reply['routing-mark'] } : {}),
-    ...(ruleReference !== null ? { ruleReference } : {}),
-    ...(reply['src-address'] ? { srcAddress: reply['src-address'] } : {}),
-    ...(reply['src-port'] ? { srcPort: reply['src-port'] } : {}),
+    ...(index !== undefined ? { physicalIndex: index } : {}),
+    dynamic: parseRouterOsBoolean(reply.dynamic),
+    invalid: parseRouterOsBoolean(reply.invalid),
+    chain: reply.chain ?? '',
+    action: reply.action ?? '',
+    ...(comment !== undefined ? { comment } : {}),
+    ownership: MangleRuleComment.parseOwnership(comment),
+    disabled: parseRouterOsBoolean(reply.disabled),
+    // RouterOS 7.21.4 siempre materializa `passthrough`; si alguna version no lo hiciera,
+    // el valor semantico correcto es el default observado, no `false`.
+    passthrough:
+      reply.passthrough !== undefined
+        ? parseRouterOsBoolean(reply.passthrough)
+        : ROUTEROS_MANGLE_RULE_DEFAULTS.passthrough,
+    ...(reply.protocol !== undefined ? { protocol: reply.protocol } : {}),
+    ...(reply['src-address'] !== undefined ? { srcAddress: reply['src-address'] } : {}),
+    ...(reply['dst-address'] !== undefined ? { dstAddress: reply['dst-address'] } : {}),
+    ...(reply['src-port'] !== undefined ? { srcPort: reply['src-port'] } : {}),
+    ...(reply['dst-port'] !== undefined ? { dstPort: reply['dst-port'] } : {}),
+    ...(reply['in-interface'] !== undefined ? { inInterface: reply['in-interface'] } : {}),
+    ...(reply['out-interface'] !== undefined ? { outInterface: reply['out-interface'] } : {}),
+    ...(reply['connection-state'] !== undefined ? { connectionState: reply['connection-state'] } : {}),
+    ...(reply['connection-mark'] !== undefined ? { connectionMark: reply['connection-mark'] } : {}),
+    ...(reply['packet-mark'] !== undefined ? { packetMark: reply['packet-mark'] } : {}),
+    ...(reply['routing-mark'] !== undefined ? { routingMark: reply['routing-mark'] } : {}),
+    ...(reply['new-connection-mark'] !== undefined ? { newConnectionMark: reply['new-connection-mark'] } : {}),
+    ...(reply['new-packet-mark'] !== undefined ? { newPacketMark: reply['new-packet-mark'] } : {}),
+    ...(reply['new-routing-mark'] !== undefined ? { newRoutingMark: reply['new-routing-mark'] } : {}),
+    bytes: reply.bytes ? parseInt(reply.bytes, 10) || 0 : 0,
+    packets: reply.packets ? parseInt(reply.packets, 10) || 0 : 0,
   };
 }

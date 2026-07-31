@@ -549,80 +549,12 @@ export type RouterOsMangleRuleLocator =
   | RouterOsMangleRuleIdLocator
   | RouterOsMangleRuleReferenceLocator;
 
-export interface RouterOsMangleRuleReference {
-  readonly id?: string;
-  readonly ruleReference?: string;
-}
-
-export interface RouterOsMangleRule {
-  readonly action: string;
-  readonly chain: string;
-  readonly comment?: string;
-  readonly connectionMark?: string;
-  readonly connectionState?: string;
-  readonly disabled: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly id: string;
-  readonly inInterface?: string;
-  readonly newConnectionMark?: string;
-  readonly newPacketMark?: string;
-  readonly newRoutingMark?: string;
-  readonly outInterface?: string;
-  readonly packetMark?: string;
-  readonly passthrough?: boolean;
-  readonly protocol?: string;
-  readonly routingMark?: string;
-  readonly ruleReference?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-}
-
-export interface RouterOsMangleRuleCreateData {
-  readonly action: string;
-  readonly chain: string;
-  readonly comment: string;
-  readonly connectionMark?: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly inInterface?: string;
-  readonly newConnectionMark?: string;
-  readonly newPacketMark?: string;
-  readonly newRoutingMark?: string;
-  readonly outInterface?: string;
-  readonly packetMark?: string;
-  readonly passthrough?: boolean;
+export interface RouterOsMangleRuleCreateData extends ManagedMangleRuleSpec {
   /** .id of the existing rule this one should be inserted before; omit to append at the end. */
   readonly placeBeforeId?: string;
-  readonly protocol?: string;
-  readonly routingMark?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
 }
 
-export interface RouterOsMangleRuleUpdateData {
-  readonly action?: string;
-  readonly chain?: string;
-  readonly comment?: string;
-  readonly connectionMark?: string;
-  readonly connectionState?: string;
-  readonly disabled?: boolean;
-  readonly dstAddress?: string;
-  readonly dstPort?: string;
-  readonly inInterface?: string;
-  readonly newConnectionMark?: string;
-  readonly newPacketMark?: string;
-  readonly newRoutingMark?: string;
-  readonly outInterface?: string;
-  readonly packetMark?: string;
-  readonly passthrough?: boolean;
-  readonly protocol?: string;
-  readonly routingMark?: string;
-  readonly srcAddress?: string;
-  readonly srcPort?: string;
-}
+export type RouterOsMangleRuleUpdateData = Partial<ManagedMangleRuleSpec>;
 
 export interface RouterOsMangleRuleMoveTarget {
   /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
@@ -716,14 +648,20 @@ export interface RouterOsClientPort {
   updateNatRule(locator: RouterOsNatRuleLocator, data: RouterOsNatRuleUpdateData): Promise<void>;
 
   createMangleRule(rule: RouterOsMangleRuleCreateData): Promise<void>;
-  disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
-  enableMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
-  findMangleRule(reference: RouterOsMangleRuleReference): Promise<RouterOsMangleRule | null>;
+  disableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void>;
+  enableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void>;
+  findMangleRuleById(id: string): Promise<ObservedMangleRule | null>;
+  /**
+   * Todas las reglas que llevan la referencia administrada. El marcador del comentario no
+   * garantiza unicidad, asi que quien necesite operar debe exigir exactamente una
+   * coincidencia en vez de tomar la primera.
+   */
+  findMangleRulesByReference(ruleReference: string): Promise<ObservedMangleRule[]>;
   /** Global, physically-ordered listing of all Mangle rules (across every chain), used to resolve position/move targets. */
-  listMangleRules(): Promise<RouterOsMangleRule[]>;
-  moveMangleRule(reference: RouterOsMangleRuleReference, target: RouterOsMangleRuleMoveTarget): Promise<void>;
-  removeMangleRule(reference: RouterOsMangleRuleReference): Promise<void>;
-  updateMangleRule(reference: RouterOsMangleRuleReference, data: RouterOsMangleRuleUpdateData): Promise<void>;
+  listMangleRules(): Promise<ObservedMangleRule[]>;
+  moveMangleRule(locator: RouterOsMangleRuleLocator, target: RouterOsMangleRuleMoveTarget): Promise<void>;
+  removeMangleRule(locator: RouterOsMangleRuleLocator): Promise<void>;
+  updateMangleRule(locator: RouterOsMangleRuleLocator, data: RouterOsMangleRuleUpdateData): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {

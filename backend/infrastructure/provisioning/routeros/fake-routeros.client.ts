@@ -30,13 +30,13 @@ import type {
   RouterOsNatRuleLocator,
   RouterOsNatRuleMoveTarget,
   RouterOsNatRuleUpdateData,
-  RouterOsMangleRule,
+  ObservedMangleRule,
   RouterOsMangleRuleCreateData,
+  RouterOsMangleRuleLocator,
   RouterOsMangleRuleMoveTarget,
-  RouterOsMangleRuleReference,
   RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
-import { ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
+import { ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS, ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
@@ -91,6 +91,35 @@ export interface FakeRouterOsNatRule {
   readonly packets: number;
 }
 
+export interface FakeRouterOsMangleRule {
+  readonly action: string;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly connectionMark?: string;
+  readonly connectionState?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstPort?: string;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly newConnectionMark?: string;
+  readonly newPacketMark?: string;
+  readonly newRoutingMark?: string;
+  readonly outInterface?: string;
+  readonly packetMark?: string;
+  /** Materializado siempre, como hace RouterOS. Nunca `undefined`. */
+  readonly passthrough: boolean;
+  readonly protocol?: string;
+  readonly routingMark?: string;
+  readonly ruleReference?: string;
+  readonly srcAddress?: string;
+  readonly srcPort?: string;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
   public queues: RouterOsSimpleQueue[] = [];
@@ -100,7 +129,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public addressListEntries: RouterOsAddressListEntry[] = [];
   public filterRules: FakeRouterOsFilterRule[] = [];
   public natRules: FakeRouterOsNatRule[] = [];
-  public mangleRules: RouterOsMangleRule[] = [];
+  public mangleRules: FakeRouterOsMangleRule[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -1009,39 +1038,46 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const ruleData: RouterOsMangleRule = {
+    const ruleData: FakeRouterOsMangleRule = {
       action: rule.action,
+      bytes: 0,
       chain: rule.chain,
       comment: rule.comment,
-      ...(rule.connectionMark !== undefined ? { connectionMark: rule.connectionMark } : {}),
-      ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
       disabled: rule.disabled ?? false,
-      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
-      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      dynamic: false,
       id: `*${this.nextId++}`,
+      invalid: false,
+      packets: 0,
+      // RouterOS materializa siempre passthrough; el doble hace lo mismo para que un
+      // valor omitido no se observe como `undefined` en un cliente y como booleano en el
+      // otro. Un `false` explicito se preserva.
+      passthrough: rule.passthrough ?? ROUTEROS_MANGLE_RULE_DEFAULTS.passthrough,
+      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
+      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
+      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
+      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
       ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      ...(rule.connectionState !== undefined ? { connectionState: rule.connectionState } : {}),
+      ...(rule.connectionMark !== undefined ? { connectionMark: rule.connectionMark } : {}),
+      ...(rule.packetMark !== undefined ? { packetMark: rule.packetMark } : {}),
+      ...(rule.routingMark !== undefined ? { routingMark: rule.routingMark } : {}),
       ...(rule.newConnectionMark !== undefined ? { newConnectionMark: rule.newConnectionMark } : {}),
       ...(rule.newPacketMark !== undefined ? { newPacketMark: rule.newPacketMark } : {}),
       ...(rule.newRoutingMark !== undefined ? { newRoutingMark: rule.newRoutingMark } : {}),
-      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
-      ...(rule.packetMark !== undefined ? { packetMark: rule.packetMark } : {}),
-      ...(rule.passthrough !== undefined ? { passthrough: rule.passthrough } : {}),
-      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
-      ...(rule.routingMark !== undefined ? { routingMark: rule.routingMark } : {}),
       ...(MangleRuleComment.extractReference(rule.comment) !== null
         ? { ruleReference: MangleRuleComment.extractReference(rule.comment)! }
         : {}),
-      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
-      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
     };
     this.insertRuleAt(this.mangleRules, ruleData, rule.placeBeforeId);
   }
 
-  public async disableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+  public async disableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveFakeMangleRule(locator);
     if (!rule) {
       return;
     }
@@ -1049,11 +1085,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.mangleRules[index] = { ...rule, disabled: true };
   }
 
-  public async enableMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+  public async enableMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveFakeMangleRule(locator);
     if (!rule) {
       return;
     }
@@ -1061,35 +1097,83 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.mangleRules[index] = { ...rule, disabled: false };
   }
 
-  public async findMangleRule(reference: RouterOsMangleRuleReference): Promise<RouterOsMangleRule | null> {
+  public async findMangleRuleById(id: string): Promise<ObservedMangleRule | null> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = this.mangleRules.find(
-      (r) =>
-        (reference.id !== undefined && r.id === reference.id) ||
-        (reference.id === undefined &&
-          reference.ruleReference !== undefined &&
-          r.ruleReference === reference.ruleReference),
-    );
-    return rule ?? null;
+    const rule = this.mangleRules.find((r) => r.id === id);
+    // Espeja al cliente real: una busqueda por `.id` no expone `physicalIndex`.
+    return rule ? this.mapFakeToObservedMangleRule(rule) : null;
   }
 
-  public async listMangleRules(): Promise<RouterOsMangleRule[]> {
+  public async findMangleRulesByReference(ruleReference: string): Promise<ObservedMangleRule[]> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    return [...this.mangleRules];
+    const matches: ObservedMangleRule[] = [];
+    this.mangleRules.forEach((r, index) => {
+      if (r.ruleReference === ruleReference) {
+        matches.push(this.mapFakeToObservedMangleRule(r, index));
+      }
+    });
+    return matches;
+  }
+
+  private async resolveFakeMangleRule(
+    locator: RouterOsMangleRuleLocator,
+  ): Promise<FakeRouterOsMangleRule | null> {
+    if (locator.kind === 'id') {
+      return this.mangleRules.find((r) => r.id === locator.id) ?? null;
+    }
+    return this.mangleRules.find((r) => r.ruleReference === locator.ruleReference) ?? null;
+  }
+
+  private mapFakeToObservedMangleRule(r: FakeRouterOsMangleRule, index?: number): ObservedMangleRule {
+    return {
+      id: r.id,
+      ...(index !== undefined ? { physicalIndex: index } : {}),
+      dynamic: r.dynamic,
+      invalid: r.invalid,
+      chain: r.chain,
+      action: r.action,
+      ...(r.comment !== undefined ? { comment: r.comment } : {}),
+      ownership: MangleRuleComment.parseOwnership(r.comment),
+      disabled: r.disabled,
+      passthrough: r.passthrough,
+      ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+      ...(r.srcAddress !== undefined ? { srcAddress: r.srcAddress } : {}),
+      ...(r.dstAddress !== undefined ? { dstAddress: r.dstAddress } : {}),
+      ...(r.srcPort !== undefined ? { srcPort: r.srcPort } : {}),
+      ...(r.dstPort !== undefined ? { dstPort: r.dstPort } : {}),
+      ...(r.inInterface !== undefined ? { inInterface: r.inInterface } : {}),
+      ...(r.outInterface !== undefined ? { outInterface: r.outInterface } : {}),
+      ...(r.connectionState !== undefined ? { connectionState: r.connectionState } : {}),
+      ...(r.connectionMark !== undefined ? { connectionMark: r.connectionMark } : {}),
+      ...(r.packetMark !== undefined ? { packetMark: r.packetMark } : {}),
+      ...(r.routingMark !== undefined ? { routingMark: r.routingMark } : {}),
+      ...(r.newConnectionMark !== undefined ? { newConnectionMark: r.newConnectionMark } : {}),
+      ...(r.newPacketMark !== undefined ? { newPacketMark: r.newPacketMark } : {}),
+      ...(r.newRoutingMark !== undefined ? { newRoutingMark: r.newRoutingMark } : {}),
+      bytes: r.bytes,
+      packets: r.packets,
+    };
+  }
+
+  public async listMangleRules(): Promise<ObservedMangleRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return this.mangleRules.map((r, i) => this.mapFakeToObservedMangleRule(r, i));
   }
 
   public async moveMangleRule(
-    reference: RouterOsMangleRuleReference,
+    locator: RouterOsMangleRuleLocator,
     target: RouterOsMangleRuleMoveTarget,
   ): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveFakeMangleRule(locator);
     if (!rule) {
       return;
     }
@@ -1097,11 +1181,11 @@ export class FakeRouterOsClient implements RouterOsClientPort {
     this.insertRuleAt(this.mangleRules, rule, target.placeBeforeId);
   }
 
-  public async removeMangleRule(reference: RouterOsMangleRuleReference): Promise<void> {
+  public async removeMangleRule(locator: RouterOsMangleRuleLocator): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveFakeMangleRule(locator);
     if (!rule) {
       return;
     }
@@ -1109,18 +1193,18 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   }
 
   public async updateMangleRule(
-    reference: RouterOsMangleRuleReference,
+    locator: RouterOsMangleRuleLocator,
     data: RouterOsMangleRuleUpdateData,
   ): Promise<void> {
     if (this.closed) {
       throw new Error('Client is closed');
     }
-    const rule = await this.findMangleRule(reference);
+    const rule = await this.resolveFakeMangleRule(locator);
     if (!rule) {
       return;
     }
     const index = this.mangleRules.findIndex((r) => r.id === rule.id);
-    const ruleData: RouterOsMangleRule = {
+    const ruleData: FakeRouterOsMangleRule = {
       ...rule,
       ...(data.action !== undefined ? { action: data.action } : {}),
       ...(data.chain !== undefined ? { chain: data.chain } : {}),
@@ -1132,22 +1216,23 @@ export class FakeRouterOsClient implements RouterOsClientPort {
               : {}),
           }
         : {}),
-      ...(data.connectionMark !== undefined ? { connectionMark: data.connectionMark } : {}),
-      ...(data.connectionState !== undefined ? { connectionState: data.connectionState } : {}),
       ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      // Un `false` explicito debe preservarse igual que un `true`.
+      ...(data.passthrough !== undefined ? { passthrough: data.passthrough } : {}),
+      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
+      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
       ...(data.dstAddress !== undefined ? { dstAddress: data.dstAddress } : {}),
+      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
       ...(data.dstPort !== undefined ? { dstPort: data.dstPort } : {}),
       ...(data.inInterface !== undefined ? { inInterface: data.inInterface } : {}),
+      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
+      ...(data.connectionState !== undefined ? { connectionState: data.connectionState } : {}),
+      ...(data.connectionMark !== undefined ? { connectionMark: data.connectionMark } : {}),
+      ...(data.packetMark !== undefined ? { packetMark: data.packetMark } : {}),
+      ...(data.routingMark !== undefined ? { routingMark: data.routingMark } : {}),
       ...(data.newConnectionMark !== undefined ? { newConnectionMark: data.newConnectionMark } : {}),
       ...(data.newPacketMark !== undefined ? { newPacketMark: data.newPacketMark } : {}),
       ...(data.newRoutingMark !== undefined ? { newRoutingMark: data.newRoutingMark } : {}),
-      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
-      ...(data.packetMark !== undefined ? { packetMark: data.packetMark } : {}),
-      ...(data.passthrough !== undefined ? { passthrough: data.passthrough } : {}),
-      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
-      ...(data.routingMark !== undefined ? { routingMark: data.routingMark } : {}),
-      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
-      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
     };
     this.mangleRules[index] = ruleData;
   }

@@ -3,7 +3,7 @@ import type { RouterConnectionResolverPort } from '../../../application/ports/pr
 import type {
   RouterOsClientFactoryPort,
   RouterOsClientPort,
-  RouterOsMangleRule,
+  ObservedMangleRule,
   RouterOsMangleRuleCreateData,
   RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
@@ -102,7 +102,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     this.assertCoherent(desired.action, desired);
     const comment = MangleRuleComment.create(ruleReference, command.comment);
 
-    const existing = await client.findMangleRule({ ruleReference: ruleReference.value });
+    const existing = (await client.findMangleRulesByReference(ruleReference.value))[0];
     if (existing) {
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
@@ -230,7 +230,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
       return ruleReference.value; // Idempotent success: nothing changed
     }
 
-    await client.updateMangleRule({ id: existing.id }, updateData);
+    await client.updateMangleRule({ kind: 'id', id: existing.id }, updateData);
     return ruleReference.value;
   }
 
@@ -245,7 +245,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     }
 
     await client.moveMangleRule(
-      { id: existing.id },
+      { kind: 'id', id: existing.id },
       target.placeBeforeId !== undefined ? { placeBeforeId: target.placeBeforeId } : {},
     );
     return ruleReference.value;
@@ -256,7 +256,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
-    await client.enableMangleRule({ id: existing.id });
+    await client.enableMangleRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
@@ -265,21 +265,21 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
-    await client.disableMangleRule({ id: existing.id });
+    await client.disableMangleRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsMangleRuleRemoveInput): Promise<string> {
-    const existing = await client.findMangleRule({ ruleReference: command.ruleReference });
+    const existing = (await client.findMangleRulesByReference(command.ruleReference))[0];
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
-    await client.removeMangleRule({ id: existing.id });
+    await client.removeMangleRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
-  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<RouterOsMangleRule> {
-    const existing = await client.findMangleRule({ ruleReference });
+  private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedMangleRule> {
+    const existing = (await client.findMangleRulesByReference(ruleReference))[0];
     if (!existing) {
       throw new RouterOsMangleRuleNotFoundError(`Regla Mangle no encontrada para la referencia: ${ruleReference}`);
     }
@@ -325,7 +325,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     };
   }
 
-  private isEquivalent(existing: RouterOsMangleRule, desired: DesiredMangleRuleFields): boolean {
+  private isEquivalent(existing: ObservedMangleRule, desired: DesiredMangleRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
       existing.action === desired.action &&
