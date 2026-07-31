@@ -618,6 +618,12 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (rule.inInterface !== undefined) attributes['in-interface'] = rule.inInterface;
     if (rule.outInterface !== undefined) attributes['out-interface'] = rule.outInterface;
     if (rule.connectionState !== undefined) attributes['connection-state'] = rule.connectionState;
+    if (rule.jumpTarget !== undefined) attributes['jump-target'] = rule.jumpTarget;
+    if (rule.rejectWith !== undefined) attributes['reject-with'] = rule.rejectWith;
+    if (rule.hotspot !== undefined) attributes.hotspot = rule.hotspot;
+    if (rule.log !== undefined) attributes.log = rule.log ? 'yes' : 'no';
+    if (rule.logPrefix !== undefined) attributes['log-prefix'] = rule.logPrefix;
+    if (rule.addressList !== undefined) attributes['address-list'] = rule.addressList;
     if (rule.disabled !== undefined) attributes.disabled = rule.disabled ? 'yes' : 'no';
     if (rule.placeBeforeId !== undefined) attributes['place-before'] = rule.placeBeforeId;
 
@@ -726,6 +732,12 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     if (data.inInterface !== undefined) attributes['in-interface'] = data.inInterface;
     if (data.outInterface !== undefined) attributes['out-interface'] = data.outInterface;
     if (data.connectionState !== undefined) attributes['connection-state'] = data.connectionState;
+    if (data.jumpTarget !== undefined) attributes['jump-target'] = data.jumpTarget;
+    if (data.rejectWith !== undefined) attributes['reject-with'] = data.rejectWith;
+    if (data.hotspot !== undefined) attributes.hotspot = data.hotspot;
+    if (data.log !== undefined) attributes.log = data.log ? 'yes' : 'no';
+    if (data.logPrefix !== undefined) attributes['log-prefix'] = data.logPrefix;
+    if (data.addressList !== undefined) attributes['address-list'] = data.addressList;
     if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
 
     if (Object.keys(attributes).length === 1) return;

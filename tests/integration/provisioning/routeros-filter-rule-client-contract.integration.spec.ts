@@ -255,7 +255,7 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
    * en produccion. Ninguna es alcanzable hoy desde una solicitud de aprovisionamiento: ni el
    * esquema Zod ni el adapter exponen estos campos. Ver el informe.
    */
-  describe('GAP: known divergences between the double and the real client', () => {
+  describe('extended fields and the one remaining known divergence', () => {
     const EXTENDED_FIELDS = {
       addressList: 'MOROSOS',
       hotspot: 'auth',
@@ -265,19 +265,43 @@ describe('RouterOsClientPort contract for Firewall Filter (Fake vs Library)', ()
       rejectWith: 'icmp-net-unreachable',
     } as const;
 
-    it('the double persists jumpTarget/rejectWith/hotspot/log/logPrefix/addressList; the library never sends them', async () => {
+    it('both honour jumpTarget/rejectWith/hotspot/log/logPrefix/addressList', async () => {
       await fake.createFilterRule({ ...SPEC, ...EXTENDED_FIELDS });
       await viaLibrary((client) => client.createFilterRule({ ...SPEC, ...EXTENDED_FIELDS }));
 
       // El doble los conserva...
-      expect(await fake.listFilterRules()).toHaveLength(1);
       expect((await fake.listFilterRules())[0]).toMatchObject(EXTENDED_FIELDS);
 
-      // ...y el cliente real no los pone en el cable.
+      // ...y el cliente real los pone en el cable con los nombres de RouterOS.
       const add = harness.captured.find((entry) => entry.command.endsWith('/add'));
-      for (const attribute of ['jump-target', 'reject-with', 'hotspot', 'log', 'log-prefix', 'address-list']) {
-        expect(add?.attributes, attribute).not.toHaveProperty(attribute);
-      }
+      expect(add?.attributes).toMatchObject({
+        'address-list': 'MOROSOS',
+        hotspot: 'auth',
+        'jump-target': 'custom-chain',
+        log: 'yes',
+        'log-prefix': 'CUZONET',
+        'reject-with': 'icmp-net-unreachable',
+      });
+    });
+
+    it('a rule carrying the extended fields round-trips to the same observed shape in both', async () => {
+      harness.existingRecords = [
+        {
+          ...ROUTER_REPLY,
+          'address-list': 'MOROSOS',
+          hotspot: 'auth',
+          'jump-target': 'custom-chain',
+          log: 'true',
+          'log-prefix': 'CUZONET',
+          'reject-with': 'icmp-net-unreachable',
+        },
+      ];
+      await fake.createFilterRule({ ...SPEC, ...EXTENDED_FIELDS });
+
+      const fromLibrary = (await viaLibrary((client) => client.listFilterRules()))[0];
+      const fromFake = (await fake.listFilterRules())[0];
+
+      expect(comparableShape(fromFake ?? null)).toEqual(comparableShape(fromLibrary ?? null));
     });
 
     it('findFilterRuleById: the double reports the real physicalIndex, the library always reports 0', async () => {

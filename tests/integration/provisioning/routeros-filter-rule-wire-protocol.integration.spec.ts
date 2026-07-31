@@ -294,19 +294,18 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
     });
 
     /**
-     * DIVERGENCIA CONOCIDA: `ManagedFilterRuleSpec` declara jumpTarget, rejectWith, hotspot,
-     * log, logPrefix y addressList, y el mapeo de lectura si los interpreta, pero el cliente
-     * NO los serializa en /add ni en /set. Hoy no son alcanzables (ni el esquema Zod ni el
-     * adapter los exponen), asi que no hay perdida de datos en produccion; queda fijado aqui
-     * para que la divergencia no pase inadvertida. Ver el informe.
+     * `ManagedFilterRuleSpec` declara jumpTarget, rejectWith, hotspot, log, logPrefix y
+     * addressList, y el mapeo de lectura los interpreta. El cliente los serializa con sus
+     * nombres RouterOS. `address-list` es el parametro de destino de las acciones
+     * add-src-to-address-list / add-dst-to-address-list, no un criterio de match.
      */
-    it('GAP: does not serialise jumpTarget, rejectWith, hotspot, log, logPrefix or addressList', async () => {
+    it('serialises jumpTarget, rejectWith, hotspot, log, logPrefix and addressList', async () => {
       await withClient((client) =>
         client.createFilterRule({
           action: 'jump',
           addressList: 'MOROSOS',
           chain: 'input',
-          comment: 'cuzonet:firewall-filter:gap',
+          comment: 'cuzonet:firewall-filter:extended',
           hotspot: 'auth',
           jumpTarget: 'custom-chain',
           log: true,
@@ -317,9 +316,39 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
 
       expect(harness.captured[0]?.attributes).toEqual({
         action: 'jump',
+        'address-list': 'MOROSOS',
         chain: 'input',
-        comment: 'cuzonet:firewall-filter:gap',
+        comment: 'cuzonet:firewall-filter:extended',
+        hotspot: 'auth',
+        'jump-target': 'custom-chain',
+        log: 'yes',
+        'log-prefix': 'CUZONET',
+        'reject-with': 'icmp-net-unreachable',
       });
+    });
+
+    it('omits each extended attribute the caller left undefined', async () => {
+      await withClient((client) =>
+        client.createFilterRule({
+          action: 'drop',
+          chain: 'input',
+          comment: 'cuzonet:firewall-filter:bare',
+        }),
+      );
+
+      for (const attribute of ['jump-target', 'reject-with', 'hotspot', 'log', 'log-prefix', 'address-list']) {
+        expect(harness.captured[0]?.attributes, attribute).not.toHaveProperty(attribute);
+      }
+    });
+
+    it('writes log as the yes/no wire flag, in both directions', async () => {
+      await withClient(async (client) => {
+        await client.createFilterRule({ action: 'drop', chain: 'input', comment: 'a', log: true });
+        await client.createFilterRule({ action: 'drop', chain: 'input', comment: 'b', log: false });
+      });
+
+      expect(harness.captured[0]?.attributes.log).toBe('yes');
+      expect(harness.captured[1]?.attributes.log).toBe('no');
     });
   });
 
@@ -374,6 +403,39 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
       const sets = harness.captured.filter((entry) => entry.command.endsWith('/set'));
       expect(sets[0]?.attributes.disabled).toBe('yes');
       expect(sets[1]?.attributes.disabled).toBe('no');
+    });
+
+    it('sends the extended attributes on /set with their RouterOS names', async () => {
+      await withClient((client) =>
+        client.updateFilterRule(
+          { id: '*3', kind: 'id' },
+          {
+            addressList: 'MOROSOS',
+            hotspot: 'auth',
+            jumpTarget: 'custom-chain',
+            log: false,
+            logPrefix: 'CUZONET',
+            rejectWith: 'icmp-net-unreachable',
+          },
+        ),
+      );
+
+      const set = harness.captured.find((entry) => entry.command.endsWith('/set'));
+      expect(set?.attributes).toEqual({
+        'address-list': 'MOROSOS',
+        hotspot: 'auth',
+        'jump-target': 'custom-chain',
+        log: 'no',
+        'log-prefix': 'CUZONET',
+        numbers: '*3',
+        'reject-with': 'icmp-net-unreachable',
+      });
+    });
+
+    it('still sends no /set when only extended attributes are omitted', async () => {
+      await withClient((client) => client.updateFilterRule({ id: '*3', kind: 'id' }, {}));
+
+      expect(commandsOf()).toEqual(['/ip/firewall/filter/print']);
     });
 
     it('resolves a managed-reference locator through a full listing before setting', async () => {
