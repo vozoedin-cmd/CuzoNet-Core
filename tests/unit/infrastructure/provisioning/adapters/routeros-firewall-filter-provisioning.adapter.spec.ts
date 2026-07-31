@@ -514,6 +514,162 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
     });
   });
 
+  /**
+   * Postcondiciones. Solo `create` y `remove` releen: son las dos operaciones cuyo efecto
+   * prometido (existe / ya no existe) el `!done` de RouterOS no garantiza por si mismo. En
+   * update/enable/disable/move la confirmacion del router basta, y releer duplicaria el
+   * coste sin anadir informacion.
+   */
+  describe('postconditions', () => {
+    const REFERENCE = 'block-ssh-wan';
+    const addPayload = {
+      action: 'drop',
+      chain: 'input',
+      routerId: 'router-1',
+      ruleReference: REFERENCE,
+    };
+
+    describe('create', () => {
+      it('re-reads and succeeds when exactly one rule carries the reference', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findFilterRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.filter.add').execute(
+          input('routeros.firewall.filter.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('success');
+        // Una resolucion previa y una relectura posterior.
+        expect(findSpy).toHaveBeenCalledTimes(2);
+        expect(fakeClient.filterRules).to.have.length(1);
+      });
+
+      it('fails with POSTCONDITION_FAILED when the router accepted the add but persisted nothing', async () => {
+        // Router que confirma el comando y no guarda nada.
+        vi.spyOn(fakeClient, 'createFilterRule').mockResolvedValueOnce(undefined);
+
+        const result = await adapterFor('routeros.firewall.filter.add').execute(
+          input('routeros.firewall.filter.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_POSTCONDITION_FAILED');
+          expect(result.errorMessage).to.contain(REFERENCE);
+        }
+      });
+
+      it('fails with POSTCONDITION_FAILED when the add left a duplicate reference', async () => {
+        const original = fakeClient.createFilterRule.bind(fakeClient);
+        vi.spyOn(fakeClient, 'createFilterRule').mockImplementationOnce(async (rule) => {
+          await original(rule);
+          await original(rule); // el router duplica la regla
+        });
+
+        const result = await adapterFor('routeros.firewall.filter.add').execute(
+          input('routeros.firewall.filter.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_POSTCONDITION_FAILED');
+          expect(result.errorMessage).to.contain('2');
+        }
+      });
+
+      it('does not re-read when the create was an idempotent no-op', async () => {
+        await fakeClient.createFilterRule({
+          action: 'drop',
+          chain: 'input',
+          comment: `cuzonet:firewall-filter:${REFERENCE}`,
+        });
+        const findSpy = vi.spyOn(fakeClient, 'findFilterRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.filter.add').execute(
+          input('routeros.firewall.filter.add', addPayload),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('remove', () => {
+      beforeEach(async () => {
+        await fakeClient.createFilterRule({
+          action: 'drop',
+          chain: 'input',
+          comment: `cuzonet:firewall-filter:${REFERENCE}`,
+        });
+      });
+
+      it('re-reads and succeeds once the rule is gone', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findFilterRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.filter.remove').execute(
+          input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(2);
+        expect(fakeClient.filterRules).to.have.length(0);
+      });
+
+      it('fails with POSTCONDITION_FAILED when the rule survives the removal', async () => {
+        // Router que confirma el comando y deja la regla en su sitio.
+        vi.spyOn(fakeClient, 'removeFilterRule').mockResolvedValueOnce(undefined);
+
+        const result = await adapterFor('routeros.firewall.filter.remove').execute(
+          input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+        );
+
+        expect(result.outcome).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_POSTCONDITION_FAILED');
+        }
+        expect(fakeClient.filterRules).to.have.length(1);
+      });
+
+      it('does not re-read when the rule was already gone', async () => {
+        const findSpy = vi.spyOn(fakeClient, 'findFilterRulesByReference');
+
+        const result = await adapterFor('routeros.firewall.filter.remove').execute(
+          input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: 'nunca-existio' }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('operations that deliberately do not re-read', () => {
+      beforeEach(async () => {
+        await fakeClient.createFilterRule({
+          action: 'drop',
+          chain: 'input',
+          comment: `cuzonet:firewall-filter:${REFERENCE}`,
+        });
+      });
+
+      const CASES = [
+        ['update', { protocol: 'udp' }],
+        ['enable', {}],
+        ['disable', {}],
+      ] as const;
+
+      it.each(CASES)('%s resolves once and trusts the router confirmation', async (operation, payload) => {
+        const findSpy = vi.spyOn(fakeClient, 'findFilterRulesByReference');
+        const actionType = `routeros.firewall.filter.${operation}`;
+
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+        );
+
+        expect(result.outcome).to.equal('success');
+        expect(findSpy).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
   it('rejects an invalid JSON payload', async () => {
     const adapter = adapterFor('routeros.firewall.filter.add');
     const badInput: ProvisioningActionInput = {

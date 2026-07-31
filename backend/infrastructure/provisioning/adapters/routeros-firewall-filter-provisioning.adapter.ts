@@ -24,6 +24,7 @@ import { RouterOsFilterRuleAmbiguousError } from '../../../domain/provisioning/r
 import { RouterOsFilterRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-conflict.error.js';
 import { RouterOsFilterRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-dynamic.error.js';
 import { RouterOsFilterRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-not-found.error.js';
+import { RouterOsFilterRulePostconditionError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-postcondition.error.js';
 import { RouterOsInvalidFilterRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-filter-rule.error.js';
 import {
   routerOsFilterRuleInputSchema,
@@ -159,6 +160,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       ...(desired.srcPort !== undefined ? { srcPort: desired.srcPort } : {}),
     };
     await client.createFilterRule(createData);
+    await this.assertExactlyOneAfterCreate(client, ruleReference.value);
     return ruleReference.value;
   }
 
@@ -269,6 +271,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     }
     this.assertNotDynamic(existing, command.ruleReference);
     await client.removeFilterRule({ kind: 'id', id: existing.id });
+    await this.assertAbsentAfterRemove(client, command.ruleReference);
     return command.ruleReference;
   }
 
@@ -315,6 +318,43 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       `La regla ${ruleReference} (${rule.id}) es dinamica y la administra RouterOS, no ` +
         'CuzoNet. Las reglas dinamicas no se pueden crear, modificar, mover, habilitar, ' +
         'deshabilitar ni eliminar desde el aprovisionamiento.',
+    );
+  }
+
+  /**
+   * Postcondicion de `create`: releer y confirmar que la referencia quedo en exactamente
+   * una regla. Cero significa que el router acepto el comando pero no persistio nada; dos
+   * o mas, que se creo un duplicado y toda operacion posterior sobre esa referencia seria
+   * ambigua. La relectura aporta aqui lo que el `!done` no garantiza.
+   */
+  private async assertExactlyOneAfterCreate(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<void> {
+    const matches = await client.findFilterRulesByReference(ruleReference);
+    if (matches.length === 1) {
+      return;
+    }
+    throw new RouterOsFilterRulePostconditionError(
+      matches.length === 0
+        ? `El router acepto la creacion de ${ruleReference} pero la regla no existe al releer.`
+        : `La creacion de ${ruleReference} dejo ${matches.length} reglas con la misma referencia ` +
+          `(${matches.map((rule) => rule.id).join(', ')}).`,
+    );
+  }
+
+  /** Postcondicion de `remove`: releer y confirmar que no queda ninguna regla con la referencia. */
+  private async assertAbsentAfterRemove(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<void> {
+    const matches = await client.findFilterRulesByReference(ruleReference);
+    if (matches.length === 0) {
+      return;
+    }
+    throw new RouterOsFilterRulePostconditionError(
+      `El router acepto la eliminacion de ${ruleReference} pero al releer siguen existiendo ` +
+        `${matches.length} reglas con esa referencia (${matches.map((rule) => rule.id).join(', ')}).`,
     );
   }
 
@@ -375,6 +415,13 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (error instanceof RouterOsFilterRuleDynamicError) {
       return {
         errorCode: 'ROUTEROS_FILTER_RULE_DYNAMIC',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsFilterRulePostconditionError) {
+      return {
+        errorCode: 'ROUTEROS_FILTER_RULE_POSTCONDITION_FAILED',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
