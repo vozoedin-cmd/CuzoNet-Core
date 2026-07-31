@@ -43,7 +43,14 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       }),
     };
     secretProvider = { getSecret: async () => 'router-secret' };
-    clientFactory = { create: async () => fakeClient };
+    // Refleja SystemRouterOsClientFactory: el adapter base cierra el cliente tras cada
+    // execute, y el factory real abre una conexion nueva en el siguiente despacho.
+    clientFactory = {
+      create: async () => {
+        fakeClient.closed = false;
+        return fakeClient;
+      },
+    };
   });
 
   describe('add', () => {
@@ -667,6 +674,267 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
         expect(result.outcome).to.equal('success');
         expect(findSpy).toHaveBeenCalledTimes(1);
       });
+    });
+  });
+
+  /**
+   * OWNERSHIP. El adapter resuelve por referencia administrada, y `parseOwnership` solo
+   * asigna `ruleReference` al estado `valid`. Eso hace que malformed, foreign y unmanaged
+   * sean INALCANZABLES por construccion, no por guarda: ninguna operacion puede verlas.
+   * Se certifica esa propiedad, que es la garantia real de que CuzoNet no toca reglas
+   * ajenas ni reclama ownership en silencio.
+   */
+  describe('ownership reachability', () => {
+    const FOREIGN = 'cuzonet:otra-instalacion:algo';
+    const MALFORMED = 'cuzonet:firewall-filter:';
+    const UNMANAGED = 'regla puesta a mano por el operador';
+
+    it('classifies each comment shape as expected', async () => {
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment: 'cuzonet:firewall-filter:ok libre' });
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment: FOREIGN });
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment: MALFORMED });
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment: UNMANAGED });
+
+      const observed = await fakeClient.listFilterRules();
+
+      expect(observed.map((rule) => rule.ownership.status)).to.deep.equal([
+        'valid', 'foreign', 'malformed', 'unmanaged',
+      ]);
+      expect(observed[0]?.ownership.ruleReference).to.equal('ok');
+      // Solo `valid` lleva referencia; el resto es irresoluble para el adapter.
+      for (const rule of observed.slice(1)) {
+        expect(rule.ownership.ruleReference, rule.ownership.status).to.equal(undefined);
+      }
+    });
+
+    const NON_VALID = [
+      ['foreign', FOREIGN],
+      ['malformed', MALFORMED],
+      ['unmanaged', UNMANAGED],
+    ] as const;
+
+    it.each(NON_VALID)('a %s rule is invisible to update/enable/disable/move: they report NOT_FOUND', async (_status, comment) => {
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment });
+
+      for (const [operation, payload] of [
+        ['update', { protocol: 'udp' }],
+        ['enable', {}],
+        ['disable', {}],
+        ['move', { position: 0 }],
+      ] as const) {
+        const actionType = `routeros.firewall.filter.${operation}`;
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: 'cualquiera', ...payload }),
+        );
+
+        expect(result.outcome, operation).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode, operation).to.equal('ROUTEROS_FILTER_RULE_NOT_FOUND');
+        }
+      }
+      // La regla ajena sigue exactamente igual.
+      expect(fakeClient.filterRules).to.have.length(1);
+      expect(fakeClient.filterRules[0]?.comment).to.equal(comment);
+    });
+
+    it.each(NON_VALID)('remove never deletes a %s rule: it reports idempotent success instead', async (_status, comment) => {
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment });
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: 'cualquiera' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules).to.have.length(1);
+    });
+
+    it.each(NON_VALID)('add does not adopt a %s rule: it creates a new managed one alongside', async (_status, comment) => {
+      await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment });
+
+      const result = await adapterFor('routeros.firewall.filter.add').execute(
+        input('routeros.firewall.filter.add', {
+          action: 'drop', chain: 'input', routerId: 'router-1', ruleReference: 'nueva',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules).to.have.length(2);
+      // El comentario ajeno no se reescribe: no se reclama ownership.
+      expect(fakeClient.filterRules[0]?.comment).to.equal(comment);
+      expect(fakeClient.filterRules[1]?.comment).to.equal('cuzonet:firewall-filter:nueva');
+    });
+
+    it('GAP: the legacy status is declared but parseOwnership never returns it', async () => {
+      const comments = ['cuzonet:firewall-filter:x', FOREIGN, MALFORMED, UNMANAGED, ' '];
+      for (const comment of comments) {
+        await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment });
+      }
+
+      const statuses = (await fakeClient.listFilterRules()).map((rule) => rule.ownership.status);
+
+      expect(statuses).not.to.contain('legacy');
+    });
+  });
+
+  /**
+   * TRAPS. Un trap del router llega al adapter como error de ejecucion; mapExecutionError
+   * decide si tiene causa conocida o cae al mapeo generico.
+   */
+  describe('router traps', () => {
+    const REFERENCE = 'trap-target';
+
+    const addInput = () =>
+      input('routeros.firewall.filter.add', {
+        action: 'drop', chain: 'input', routerId: 'router-1', ruleReference: REFERENCE,
+      });
+
+    async function seedRule(): Promise<void> {
+      await fakeClient.createFilterRule({
+        action: 'drop', chain: 'input', comment: `cuzonet:firewall-filter:${REFERENCE}`,
+      });
+    }
+
+    const CLASSIFIED = [
+      ['invalid chain value'],
+      ['invalid protocol name'],
+      ['invalid interface ether99'],
+      ['invalid address 999.1.1.1'],
+    ] as const;
+
+    it.each(CLASSIFIED)('maps a trap reading "%s" to ROUTEROS_INVALID_FILTER_RULE', async (message) => {
+      vi.spyOn(fakeClient, 'createFilterRule').mockRejectedValueOnce(new Error(message));
+
+      const result = await adapterFor('routeros.firewall.filter.add').execute(addInput());
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_FILTER_RULE');
+      }
+    });
+
+    it('falls back to ROUTEROS_EXECUTION_FAILED for an unclassified trap', async () => {
+      vi.spyOn(fakeClient, 'createFilterRule').mockRejectedValueOnce(
+        new Error('failure: already have such entry'),
+      );
+
+      const result = await adapterFor('routeros.firewall.filter.add').execute(addInput());
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_EXECUTION_FAILED');
+      }
+    });
+
+    it('treats a connection timeout as a temporary failure, so the engine can retry', async () => {
+      vi.spyOn(fakeClient, 'createFilterRule').mockRejectedValueOnce(new Error('command timeout'));
+
+      const result = await adapterFor('routeros.firewall.filter.add').execute(addInput());
+
+      expect(result.outcome).to.equal('temporaryFailure');
+    });
+
+    it('propagates a trap raised during update', async () => {
+      await seedRule();
+      vi.spyOn(fakeClient, 'updateFilterRule').mockRejectedValueOnce(new Error('invalid chain value'));
+
+      const result = await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          protocol: 'udp', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_FILTER_RULE');
+      }
+    });
+
+    it('propagates a trap raised during remove, without masking it as a postcondition failure', async () => {
+      await seedRule();
+      vi.spyOn(fakeClient, 'removeFilterRule').mockRejectedValueOnce(new Error('no such item'));
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_EXECUTION_FAILED');
+      }
+      expect(fakeClient.filterRules).to.have.length(1);
+    });
+  });
+
+  /** UPDATE: preservacion de campos no solicitados y semantica de vaciado. */
+  describe('update field semantics', () => {
+    const REFERENCE = 'field-semantics';
+
+    beforeEach(async () => {
+      await fakeClient.createFilterRule({
+        action: 'drop',
+        chain: 'input',
+        comment: `cuzonet:firewall-filter:${REFERENCE} texto original`,
+        dstPort: '22',
+        protocol: 'tcp',
+        srcAddress: '192.168.1.0/24',
+      });
+    });
+
+    it('preserves every field the request did not mention', async () => {
+      const result = await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          action: 'accept', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules[0]).to.include({
+        action: 'accept',
+        chain: 'input',
+        dstPort: '22',
+        protocol: 'tcp',
+        srcAddress: '192.168.1.0/24',
+      });
+    });
+
+    it('sends only the fields that actually differ from the observed rule', async () => {
+      const updateSpy = vi.spyOn(fakeClient, 'updateFilterRule');
+
+      await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          action: 'accept',
+          chain: 'input',
+          routerId: 'router-1',
+          ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy.mock.calls[0]?.[1]).to.deep.equal({ action: 'accept' });
+    });
+
+    it('clearing the user comment leaves the bare ownership marker, never an empty comment', async () => {
+      const result = await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          comment: '', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      // El marcador sobrevive: vaciar el comentario no puede costar la identidad de la regla.
+      expect(fakeClient.filterRules[0]?.comment).to.equal(`cuzonet:firewall-filter:${REFERENCE}`);
+      expect(fakeClient.filterRules[0]?.ruleReference).to.equal(REFERENCE);
+    });
+
+    it('rejects an empty srcAddress instead of treating it as a clear', async () => {
+      const result = await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          routerId: 'router-1', ruleReference: REFERENCE, srcAddress: '',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      expect(fakeClient.filterRules[0]?.srcAddress).to.equal('192.168.1.0/24');
     });
   });
 
