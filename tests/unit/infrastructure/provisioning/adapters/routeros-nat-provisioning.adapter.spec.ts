@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import type { ProvisioningActionInput } from '../../../../../backend/application/ports/provisioning/provisioning-action-adapter.port.js';
 import type { RouterConnectionResolverPort } from '../../../../../backend/application/ports/provisioning/routeros/router-connection-resolver.port.js';
@@ -43,7 +43,14 @@ describe('RouterOsNatProvisioningAdapter', () => {
       }),
     };
     secretProvider = { getSecret: async () => 'router-secret' };
-    clientFactory = { create: async () => fakeClient };
+    // Refleja SystemRouterOsClientFactory: el adapter base cierra el cliente tras cada
+    // execute, y el factory real abre una conexion nueva en el siguiente despacho.
+    clientFactory = {
+      create: async () => {
+        fakeClient.closed = false;
+        return fakeClient;
+      },
+    };
   });
 
   describe('add', () => {
@@ -428,5 +435,157 @@ describe('RouterOsNatProvisioningAdapter', () => {
     if (result.outcome === 'permanentFailure') {
       expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
     }
+  });
+
+  /**
+   * RouterOS no impone unicidad sobre el marcador del comentario: dos reglas NAT pueden
+   * compartir referencia tras una duplicacion en WinBox o una importacion. Operar sobre la
+   * primera dejaria la gemela viva — para un reenvio de puerto, lo contrario de lo pedido.
+   */
+  describe('ambiguous managed reference', () => {
+    const REFERENCE = 'port-8080';
+    const BASE = {
+      action: 'dst-nat',
+      chain: 'dstnat',
+      comment: `cuzonet:firewall-nat:${REFERENCE}`,
+      toAddresses: '192.168.1.50',
+    } as const;
+
+    beforeEach(async () => {
+      await fakeClient.createNatRule(BASE);
+      await fakeClient.createNatRule(BASE);
+      expect(fakeClient.natRules).to.have.length(2);
+    });
+
+    const OPERATIONS = [
+      ['add', 'createNatRule', { action: 'dst-nat', chain: 'dstnat', toAddresses: '192.168.1.50' }],
+      ['update', 'updateNatRule', { toPorts: '8081' }],
+      ['move', 'moveNatRule', { position: 0 }],
+      ['enable', 'enableNatRule', {}],
+      ['disable', 'disableNatRule', {}],
+      ['remove', 'removeNatRule', {}],
+    ] as const;
+
+    it.each(OPERATIONS)('%s fails with AMBIGUOUS and never touches the router', async (operation, clientMethod, payload) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.nat.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_AMBIGUOUS');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(fakeClient.natRules).to.have.length(2);
+    });
+
+    it('names every candidate id so the operator can resolve it on the router', async () => {
+      const ids = fakeClient.natRules.map((rule) => rule.id);
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain(REFERENCE);
+        for (const id of ids) expect(result.errorMessage).to.contain(id);
+      }
+    });
+
+    it('does not affect a different reference that resolves to a single rule', async () => {
+      await fakeClient.createNatRule({
+        action: 'masquerade',
+        chain: 'srcnat',
+        comment: 'cuzonet:firewall-nat:salida-wan',
+      });
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: 'salida-wan' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules).to.have.length(2);
+    });
+  });
+
+  /**
+   * Las reglas NAT dinamicas las genera RouterOS. El caso frecuente es UPnP, que crea
+   * mapeos dst-nat a peticion de la LAN y los retira solo. Mutarlas informaria de un cambio
+   * que no perdura.
+   */
+  describe('dynamic rule guard', () => {
+    const REFERENCE = 'upnp-generated';
+
+    beforeEach(async () => {
+      await fakeClient.createNatRule({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        comment: `cuzonet:firewall-nat:${REFERENCE}`,
+        toAddresses: '192.168.1.77',
+      });
+      const rule = fakeClient.natRules[0]!;
+      fakeClient.natRules[0] = { ...rule, dynamic: true };
+    });
+
+    const OPERATIONS = [
+      ['add', 'createNatRule', { action: 'dst-nat', chain: 'dstnat', toAddresses: '192.168.1.77' }],
+      ['update', 'updateNatRule', { toPorts: '8081' }],
+      ['move', 'moveNatRule', { position: 0 }],
+      ['enable', 'enableNatRule', {}],
+      ['disable', 'disableNatRule', {}],
+      ['remove', 'removeNatRule', {}],
+    ] as const;
+
+    it.each(OPERATIONS)('%s fails with DYNAMIC and never touches the router', async (operation, clientMethod, payload) => {
+      const spy = vi.spyOn(fakeClient, clientMethod);
+      const actionType = `routeros.firewall.nat.${operation}`;
+
+      const result = await adapterFor(actionType).execute(
+        input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_DYNAMIC');
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(fakeClient.natRules[0]?.dynamic).to.equal(true);
+    });
+
+    it('a dynamic rule can still be observed, only not mutated', async () => {
+      const [observed] = await fakeClient.findNatRulesByReference(REFERENCE);
+
+      expect(observed?.dynamic).to.equal(true);
+      expect(observed?.ownership.ruleReference).to.equal(REFERENCE);
+    });
+
+    it('still reports NOT_FOUND, not DYNAMIC, when no rule carries the reference', async () => {
+      const result = await adapterFor('routeros.firewall.nat.enable').execute(
+        input('routeros.firewall.nat.enable', { routerId: 'router-1', ruleReference: 'no-existe' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_NOT_FOUND');
+      }
+    });
+
+    it('leaves a static rule with a different reference fully operable', async () => {
+      await fakeClient.createNatRule({
+        action: 'masquerade',
+        chain: 'srcnat',
+        comment: 'cuzonet:firewall-nat:static-one',
+      });
+
+      const result = await adapterFor('routeros.firewall.nat.disable').execute(
+        input('routeros.firewall.nat.disable', { routerId: 'router-1', ruleReference: 'static-one' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules.find((r) => r.ruleReference === 'static-one')?.disabled).to.equal(true);
+    });
   });
 });

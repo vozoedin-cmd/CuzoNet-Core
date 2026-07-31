@@ -20,7 +20,9 @@ import { NatToAddress } from '../../../domain/provisioning/routeros/value-object
 import { PortSpecification } from '../../../domain/provisioning/routeros/value-objects/port-specification.js';
 import { Protocol } from '../../../domain/provisioning/routeros/value-objects/protocol.js';
 import { RouterOsInvalidNatRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-nat-rule.error.js';
+import { RouterOsNatRuleAmbiguousError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-ambiguous.error.js';
 import { RouterOsNatRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-conflict.error.js';
+import { RouterOsNatRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-dynamic.error.js';
 import { RouterOsNatRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-not-found.error.js';
 import {
   routerOsNatRuleInputSchema,
@@ -90,8 +92,11 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     this.assertCoherent(desired.chain as NatChainName, desired.action, desired.toAddresses);
     const comment = NatRuleComment.create(ruleReference, command.comment);
 
-    const existing = (await client.findNatRulesByReference(ruleReference.value))[0];
+    const existing = await this.resolveSingle(client, ruleReference.value);
     if (existing) {
+      // Una regla dinamica ocupa la referencia pero no es administrable: no puede
+      // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
+      this.assertNotDynamic(existing, ruleReference.value);
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
       }
@@ -127,6 +132,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
   private async handleUpdate(client: RouterOsClientPort, command: RouterOsNatRuleUpdateInput): Promise<string> {
     const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const resultingChain = command.chain !== undefined ? NatChain.create(command.chain).value : existing.chain;
     const resultingAction = command.action !== undefined ? NatAction.create(command.action).value : existing.action;
@@ -195,6 +201,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
   private async handleMove(client: RouterOsClientPort, command: RouterOsNatRuleMoveInput): Promise<string> {
     const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const rules = await client.listNatRules();
     const target = resolveMoveTarget(rules, existing.id, command.position);
@@ -211,6 +218,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
 
   private async handleEnable(client: RouterOsClientPort, command: RouterOsNatRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
@@ -220,6 +228,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
 
   private async handleDisable(client: RouterOsClientPort, command: RouterOsNatRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
@@ -228,16 +237,17 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsNatRuleRemoveInput): Promise<string> {
-    const existing = (await client.findNatRulesByReference(command.ruleReference))[0];
+    const existing = await this.resolveSingle(client, command.ruleReference);
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
+    this.assertNotDynamic(existing, command.ruleReference);
     await client.removeNatRule({ kind: 'id', id: existing.id });
     return command.ruleReference;
   }
 
   private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedNatRule> {
-    const existing = (await client.findNatRulesByReference(ruleReference))[0];
+    const existing = await this.resolveSingle(client, ruleReference);
     if (!existing) {
       throw new RouterOsNatRuleNotFoundError(`Regla NAT no encontrada para la referencia: ${ruleReference}`);
     }
@@ -273,6 +283,46 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     };
   }
 
+  /**
+   * Resuelve una referencia administrada exigiendo como maximo una coincidencia.
+   *
+   * RouterOS no impone unicidad sobre el marcador del comentario, asi que dos reglas NAT
+   * pueden compartir referencia tras una duplicacion manual o una importacion. Quedarse con
+   * la primera dejaria la gemela intacta e informaria exito igualmente: para un reenvio de
+   * puerto, exactamente lo contrario de lo pedido.
+   */
+  private async resolveSingle(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<ObservedNatRule | null> {
+    const matches = await client.findNatRulesByReference(ruleReference);
+    if (matches.length > 1) {
+      throw new RouterOsNatRuleAmbiguousError(
+        `La referencia ${ruleReference} resuelve a ${matches.length} reglas NAT en el router ` +
+          `(${matches.map((rule) => rule.id).join(', ')}). No se opera sobre una eleccion ` +
+          'arbitraria: resuelva la duplicidad en el router antes de reintentar.',
+      );
+    }
+    return matches[0] ?? null;
+  }
+
+  /**
+   * Las reglas `dynamic=true` las gobierna RouterOS. En NAT el caso mas frecuente es UPnP,
+   * que crea mapeos `dst-nat` dinamicos a peticion de los dispositivos de la LAN: no se
+   * guardan en la configuracion y desapareceran solas. La guarda corta antes de enviar
+   * comando alguno.
+   */
+  private assertNotDynamic(rule: ObservedNatRule, ruleReference: string): void {
+    if (!rule.dynamic) {
+      return;
+    }
+    throw new RouterOsNatRuleDynamicError(
+      `La regla NAT ${ruleReference} (${rule.id}) es dinamica y la administra RouterOS, no ` +
+        'CuzoNet. Las reglas dinamicas no se pueden crear, modificar, mover, habilitar, ' +
+        'deshabilitar ni eliminar desde el aprovisionamiento.',
+    );
+  }
+
   private isEquivalent(existing: ObservedNatRule, desired: DesiredNatRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
@@ -302,6 +352,20 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (error instanceof RouterOsNatRuleConflictError) {
       return {
         errorCode: 'ROUTEROS_NAT_RULE_CONFLICT',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsNatRuleAmbiguousError) {
+      return {
+        errorCode: 'ROUTEROS_NAT_RULE_AMBIGUOUS',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsNatRuleDynamicError) {
+      return {
+        errorCode: 'ROUTEROS_NAT_RULE_DYNAMIC',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
