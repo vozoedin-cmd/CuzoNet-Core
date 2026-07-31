@@ -745,4 +745,215 @@ describe('RouterOsNatProvisioningAdapter', () => {
       });
     });
   });
+
+  /**
+   * OWNERSHIP, capa 1: alcanzabilidad. `parseOwnership` solo adjunta `ruleReference` al
+   * estado `valid`, y toda operacion resuelve por esa referencia, asi que foreign,
+   * malformed y unmanaged son INALCANZABLES por construccion. Esa es la garantia real de
+   * que CuzoNet no toca reglas NAT ajenas ni reclama ownership en silencio.
+   */
+  describe('ownership reachability', () => {
+    const FOREIGN = 'cuzonet:firewall-filter:algo';
+    const MALFORMED = 'cuzonet:firewall-nat:';
+    const UNMANAGED = 'masquerade puesta a mano por el operador';
+
+    it('classifies each comment shape as expected', async () => {
+      for (const comment of ['cuzonet:firewall-nat:ok libre', FOREIGN, MALFORMED, UNMANAGED]) {
+        await fakeClient.createNatRule({ action: 'masquerade', chain: 'srcnat', comment });
+      }
+
+      const observed = await fakeClient.listNatRules();
+
+      expect(observed.map((rule) => rule.ownership.status)).to.deep.equal([
+        'valid', 'foreign', 'malformed', 'unmanaged',
+      ]);
+      expect(observed[0]?.ownership.ruleReference).to.equal('ok');
+      for (const rule of observed.slice(1)) {
+        expect(rule.ownership.ruleReference, rule.ownership.status).to.equal(undefined);
+      }
+    });
+
+    const NON_VALID = [
+      ['foreign', FOREIGN],
+      ['malformed', MALFORMED],
+      ['unmanaged', UNMANAGED],
+    ] as const;
+
+    it.each(NON_VALID)('a %s rule is invisible to update/enable/disable/move: they report NOT_FOUND', async (_status, comment) => {
+      await fakeClient.createNatRule({ action: 'masquerade', chain: 'srcnat', comment });
+
+      for (const [operation, payload] of [
+        ['update', { toPorts: '8081' }],
+        ['enable', {}],
+        ['disable', {}],
+        ['move', { position: 0 }],
+      ] as const) {
+        const actionType = `routeros.firewall.nat.${operation}`;
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: 'cualquiera', ...payload }),
+        );
+
+        expect(result.outcome, operation).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode, operation).to.equal('ROUTEROS_NAT_RULE_NOT_FOUND');
+        }
+      }
+      expect(fakeClient.natRules).to.have.length(1);
+      expect(fakeClient.natRules[0]?.comment).to.equal(comment);
+    });
+
+    it.each(NON_VALID)('remove never deletes a %s rule: it reports idempotent success instead', async (_status, comment) => {
+      await fakeClient.createNatRule({ action: 'masquerade', chain: 'srcnat', comment });
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: 'cualquiera' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules).to.have.length(1);
+    });
+
+    it.each(NON_VALID)('add does not adopt a %s rule: it creates a new managed one alongside', async (_status, comment) => {
+      await fakeClient.createNatRule({ action: 'masquerade', chain: 'srcnat', comment });
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', {
+          action: 'masquerade', chain: 'srcnat', routerId: 'router-1', ruleReference: 'nueva',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules).to.have.length(2);
+      // El comentario ajeno no se reescribe: no se reclama ownership.
+      expect(fakeClient.natRules[0]?.comment).to.equal(comment);
+      expect(fakeClient.natRules[1]?.comment).to.equal('cuzonet:firewall-nat:nueva');
+    });
+  });
+
+  /**
+   * OWNERSHIP, capa 2: la guarda defensiva. Fuerza el escenario contra el que protege —una
+   * resolucion aflojada que devuelve una regla no `valid`, como pasaria si algun dia se
+   * buscara por chain+action o por `.id`— y comprueba que se rechaza en vez de mutarse.
+   */
+  describe('ownership guard (defensive)', () => {
+    const REFERENCE = 'guarded';
+
+    function resolveAs(status: 'foreign' | 'malformed' | 'unmanaged'): void {
+      vi.spyOn(fakeClient, 'findNatRulesByReference').mockResolvedValue([
+        {
+          action: 'masquerade',
+          bytes: 0,
+          chain: 'srcnat',
+          disabled: false,
+          dynamic: false,
+          id: '*7',
+          invalid: false,
+          ownership: { status },
+          packets: 0,
+          physicalIndex: 0,
+        },
+      ]);
+    }
+
+    const STATUSES = ['foreign', 'malformed', 'unmanaged'] as const;
+
+    const MUTATIONS = [
+      ['update', 'updateNatRule', { toPorts: '8081' }],
+      ['move', 'moveNatRule', { position: 0 }],
+      ['enable', 'enableNatRule', {}],
+      ['disable', 'disableNatRule', {}],
+      ['remove', 'removeNatRule', {}],
+    ] as const;
+
+    it.each(STATUSES)('refuses every mutation on a %s rule, without touching the router', async (status) => {
+      for (const [operation, clientMethod, payload] of MUTATIONS) {
+        resolveAs(status);
+        const spy = vi.spyOn(fakeClient, clientMethod);
+        const actionType = `routeros.firewall.nat.${operation}`;
+
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+        );
+
+        expect(result.outcome, `${status}/${operation}`).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode, `${status}/${operation}`).to.equal(
+            'ROUTEROS_NAT_RULE_OWNERSHIP_VIOLATION',
+          );
+        }
+        expect(spy, `${status}/${operation}`).not.toHaveBeenCalled();
+        vi.restoreAllMocks();
+      }
+    });
+
+    it.each(STATUSES)('refuses add when the reference resolves to a %s rule', async (status) => {
+      resolveAs(status);
+      const createSpy = vi.spyOn(fakeClient, 'createNatRule');
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', {
+          action: 'masquerade', chain: 'srcnat', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_OWNERSHIP_VIOLATION');
+      }
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it('reports the offending status and rule id in the message', async () => {
+      resolveAs('foreign');
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain('foreign');
+        expect(result.errorMessage).to.contain('*7');
+        expect(result.errorMessage).to.contain(REFERENCE);
+      }
+    });
+
+    it('ownership is checked before the dynamic guard: a foreign dynamic rule reports ownership', async () => {
+      vi.spyOn(fakeClient, 'findNatRulesByReference').mockResolvedValue([
+        {
+          action: 'dst-nat',
+          bytes: 0,
+          chain: 'dstnat',
+          disabled: false,
+          dynamic: true,
+          id: '*8',
+          invalid: false,
+          ownership: { status: 'foreign' },
+          packets: 0,
+          physicalIndex: 0,
+        },
+      ]);
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_NAT_RULE_OWNERSHIP_VIOLATION');
+      }
+    });
+
+    it('a valid rule passes the guard and the operation goes through as usual', async () => {
+      await fakeClient.createNatRule({
+        action: 'masquerade', chain: 'srcnat', comment: `cuzonet:firewall-nat:${REFERENCE}`,
+      });
+
+      const result = await adapterFor('routeros.firewall.nat.disable').execute(
+        input('routeros.firewall.nat.disable', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules[0]?.disabled).to.equal(true);
+    });
+  });
 });

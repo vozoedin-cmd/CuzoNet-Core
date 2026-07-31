@@ -24,6 +24,7 @@ import { RouterOsNatRuleAmbiguousError } from '../../../domain/provisioning/rout
 import { RouterOsNatRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-conflict.error.js';
 import { RouterOsNatRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-dynamic.error.js';
 import { RouterOsNatRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-not-found.error.js';
+import { RouterOsNatRuleOwnershipError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-ownership.error.js';
 import { RouterOsNatRulePostconditionError } from '../../../domain/provisioning/routeros/errors/routeros-nat-rule-postcondition.error.js';
 import {
   routerOsNatRuleInputSchema,
@@ -95,6 +96,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
 
     const existing = await this.resolveSingle(client, ruleReference.value);
     if (existing) {
+      this.assertOwned(existing, ruleReference.value);
       // Una regla dinamica ocupa la referencia pero no es administrable: no puede
       // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
       this.assertNotDynamic(existing, ruleReference.value);
@@ -134,6 +136,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
   private async handleUpdate(client: RouterOsClientPort, command: RouterOsNatRuleUpdateInput): Promise<string> {
     const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
     this.assertNotDynamic(existing, ruleReference.value);
 
     const resultingChain = command.chain !== undefined ? NatChain.create(command.chain).value : existing.chain;
@@ -203,6 +206,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
   private async handleMove(client: RouterOsClientPort, command: RouterOsNatRuleMoveInput): Promise<string> {
     const ruleReference = NatRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
     this.assertNotDynamic(existing, ruleReference.value);
 
     const rules = await client.listNatRules();
@@ -220,6 +224,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
 
   private async handleEnable(client: RouterOsClientPort, command: RouterOsNatRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
@@ -230,6 +235,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
 
   private async handleDisable(client: RouterOsClientPort, command: RouterOsNatRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
@@ -243,6 +249,7 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     await client.removeNatRule({ kind: 'id', id: existing.id });
     await this.assertAbsentAfterRemove(client, command.ruleReference);
@@ -307,6 +314,31 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
       );
     }
     return matches[0] ?? null;
+  }
+
+  /**
+   * Solo se muta una regla NAT cuyo marcador de propiedad se lee correctamente y es de esta
+   * instalacion (`valid`).
+   *
+   * Hoy la guarda nunca dispara: `parseOwnership` solo adjunta `ruleReference` al estado
+   * `valid`, y toda operacion resuelve por esa referencia, asi que las reglas ajenas no
+   * llegan hasta aqui. Se deja de forma defensiva para que la garantia sea exigida y no
+   * emergente: si la resolucion se afloja alguna vez, una regla ajena se rechaza en vez de
+   * mutarse en silencio. En NAT eso protege cosas como la `masquerade` de salida o un
+   * `dst-nat` administrado por otro sistema.
+   *
+   * `malformed` tambien se rechaza: repararla exigiria reescribir su comentario para
+   * reclamar su propiedad, decision de producto que el dominio no ha tomado.
+   */
+  private assertOwned(rule: ObservedNatRule, ruleReference: string): void {
+    if (rule.ownership.status === 'valid') {
+      return;
+    }
+    throw new RouterOsNatRuleOwnershipError(
+      `La regla NAT ${rule.id} resuelta para ${ruleReference} tiene ownership ` +
+        `"${rule.ownership.status}" y no la administra CuzoNet. No se modifican reglas ` +
+        'ajenas ni se reclama su propiedad de forma implicita.',
+    );
   }
 
   /**
@@ -414,6 +446,13 @@ export class RouterOsNatProvisioningAdapter extends RouterOsProvisioningAdapterB
     if (error instanceof RouterOsNatRulePostconditionError) {
       return {
         errorCode: 'ROUTEROS_NAT_RULE_POSTCONDITION_FAILED',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsNatRuleOwnershipError) {
+      return {
+        errorCode: 'ROUTEROS_NAT_RULE_OWNERSHIP_VIOLATION',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };
