@@ -956,4 +956,266 @@ describe('RouterOsNatProvisioningAdapter', () => {
       expect(fakeClient.natRules[0]?.disabled).to.equal(true);
     });
   });
+
+  /**
+   * COHERENCIA chain/action/toAddresses. Es logica propia de NAT, sin equivalente en
+   * Firewall Filter: no toda accion vale en toda cadena, y las que traducen direccion
+   * exigen destino. Se valida en el adapter, antes de tocar el router.
+   */
+  describe('chain, action and toAddresses coherence', () => {
+    const base = { routerId: 'router-1', ruleReference: 'coherencia' };
+
+    const VALID = [
+      ['dstnat', 'dst-nat', { toAddresses: '192.168.1.50' }],
+      ['dstnat', 'redirect', {}],
+      ['dstnat', 'netmap', { toAddresses: '192.168.1.0/24' }],
+      ['srcnat', 'masquerade', {}],
+      ['srcnat', 'src-nat', { toAddresses: '203.0.113.1' }],
+      ['srcnat', 'netmap', { toAddresses: '203.0.113.0/24' }],
+    ] as const;
+
+    it.each(VALID)('accepts %s + %s', async (chain, action, extra) => {
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', { ...base, action, chain, ...extra }),
+      );
+
+      expect(result.outcome, `${chain}/${action}`).to.equal('success');
+      expect(fakeClient.natRules).to.have.length(1);
+    });
+
+    const INCOMPATIBLE = [
+      ['dstnat', 'masquerade'],
+      ['dstnat', 'src-nat'],
+      ['srcnat', 'dst-nat'],
+      ['srcnat', 'redirect'],
+    ] as const;
+
+    it.each(INCOMPATIBLE)('refuses %s + %s as an incompatible combination', async (chain, action) => {
+      const createSpy = vi.spyOn(fakeClient, 'createNatRule');
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', { ...base, action, chain, toAddresses: '192.168.1.50' }),
+      );
+
+      expect(result.outcome, `${chain}/${action}`).to.equal('permanentFailure');
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fakeClient.natRules).to.have.length(0);
+    });
+
+    const NEEDS_TARGET = [
+      ['dstnat', 'dst-nat'],
+      ['srcnat', 'src-nat'],
+      ['srcnat', 'netmap'],
+    ] as const;
+
+    it.each(NEEDS_TARGET)('refuses %s + %s without toAddresses', async (chain, action) => {
+      const createSpy = vi.spyOn(fakeClient, 'createNatRule');
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', { ...base, action, chain }),
+      );
+
+      expect(result.outcome, `${chain}/${action}`).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_NAT_RULE');
+        expect(result.errorMessage).to.contain('toAddresses');
+      }
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it('refuses an empty toAddresses exactly like an absent one', async () => {
+      const result = await adapterFor('routeros.firewall.nat.add').execute(
+        input('routeros.firewall.nat.add', { ...base, action: 'dst-nat', chain: 'dstnat', toAddresses: '' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+    });
+
+    it('re-checks coherence on update, against the resulting rule and not just the payload', async () => {
+      await fakeClient.createNatRule({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        comment: 'cuzonet:firewall-nat:coherencia',
+        toAddresses: '192.168.1.50',
+      });
+      const updateSpy = vi.spyOn(fakeClient, 'updateNatRule');
+
+      // Cambiar solo la cadena dejaria dstnat->srcnat con una accion incompatible.
+      const result = await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', { ...base, chain: 'srcnat' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_NAT_RULE');
+      }
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * TRAPS. Un trap del router llega al adapter como error de ejecucion; mapExecutionError
+   * decide si tiene causa conocida o cae al mapeo generico.
+   */
+  describe('router traps', () => {
+    const REFERENCE = 'trap-target';
+
+    const addInput = () =>
+      input('routeros.firewall.nat.add', {
+        action: 'masquerade', chain: 'srcnat', routerId: 'router-1', ruleReference: REFERENCE,
+      });
+
+    async function seedRule(): Promise<void> {
+      await fakeClient.createNatRule({
+        action: 'masquerade', chain: 'srcnat', comment: `cuzonet:firewall-nat:${REFERENCE}`,
+      });
+    }
+
+    const CLASSIFIED = [
+      ['invalid chain value'],
+      ['invalid protocol name'],
+      ['invalid interface ether99'],
+      ['invalid address 999.1.1.1'],
+    ] as const;
+
+    it.each(CLASSIFIED)('maps a trap reading "%s" to ROUTEROS_INVALID_NAT_RULE', async (message) => {
+      vi.spyOn(fakeClient, 'createNatRule').mockRejectedValueOnce(new Error(message));
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(addInput());
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_NAT_RULE');
+      }
+    });
+
+    it('falls back to ROUTEROS_EXECUTION_FAILED for an unclassified trap', async () => {
+      vi.spyOn(fakeClient, 'createNatRule').mockRejectedValueOnce(
+        new Error('failure: already have such entry'),
+      );
+
+      const result = await adapterFor('routeros.firewall.nat.add').execute(addInput());
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_EXECUTION_FAILED');
+      }
+    });
+
+    it('treats a connection timeout as a temporary failure, so the engine can retry', async () => {
+      vi.spyOn(fakeClient, 'createNatRule').mockRejectedValueOnce(new Error('command timeout'));
+
+      expect((await adapterFor('routeros.firewall.nat.add').execute(addInput())).outcome).to.equal(
+        'temporaryFailure',
+      );
+    });
+
+    it('propagates a trap raised during update', async () => {
+      await seedRule();
+      vi.spyOn(fakeClient, 'updateNatRule').mockRejectedValueOnce(new Error('invalid chain value'));
+
+      const result = await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', {
+          routerId: 'router-1', ruleReference: REFERENCE, toPorts: '8081',
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_INVALID_NAT_RULE');
+      }
+    });
+
+    it('propagates a trap raised during remove, without masking it as a postcondition failure', async () => {
+      await seedRule();
+      vi.spyOn(fakeClient, 'removeNatRule').mockRejectedValueOnce(new Error('no such item'));
+
+      const result = await adapterFor('routeros.firewall.nat.remove').execute(
+        input('routeros.firewall.nat.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_EXECUTION_FAILED');
+      }
+      expect(fakeClient.natRules).to.have.length(1);
+    });
+  });
+
+  /** UPDATE: preservacion de campos no solicitados y semantica de vaciado. */
+  describe('update field semantics', () => {
+    const REFERENCE = 'field-semantics';
+
+    beforeEach(async () => {
+      await fakeClient.createNatRule({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        comment: `cuzonet:firewall-nat:${REFERENCE} texto original`,
+        dstPort: '8080',
+        protocol: 'tcp',
+        toAddresses: '192.168.1.50',
+        toPorts: '80',
+      });
+    });
+
+    it('preserves every field the request did not mention', async () => {
+      const result = await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', {
+          routerId: 'router-1', ruleReference: REFERENCE, toPorts: '8081',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.natRules[0]).to.include({
+        action: 'dst-nat',
+        chain: 'dstnat',
+        dstPort: '8080',
+        protocol: 'tcp',
+        toAddresses: '192.168.1.50',
+        toPorts: '8081',
+      });
+    });
+
+    it('sends only the fields that actually differ from the observed rule', async () => {
+      const updateSpy = vi.spyOn(fakeClient, 'updateNatRule');
+
+      await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', {
+          chain: 'dstnat', // igual al actual: no debe viajar
+          routerId: 'router-1',
+          ruleReference: REFERENCE,
+          toPorts: '8081',
+        }),
+      );
+
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy.mock.calls[0]?.[1]).to.deep.equal({ toPorts: '8081' });
+    });
+
+    it('is idempotent when nothing actually changes', async () => {
+      const updateSpy = vi.spyOn(fakeClient, 'updateNatRule');
+
+      const result = await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', {
+          routerId: 'router-1', ruleReference: REFERENCE, toPorts: '80',
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('clearing the user comment leaves the bare ownership marker, never an empty comment', async () => {
+      const result = await adapterFor('routeros.firewall.nat.update').execute(
+        input('routeros.firewall.nat.update', {
+          comment: '', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      // El marcador sobrevive: vaciar el comentario no puede costar la identidad de la regla.
+      expect(fakeClient.natRules[0]?.comment).to.equal(`cuzonet:firewall-nat:${REFERENCE}`);
+      expect(fakeClient.natRules[0]?.ruleReference).to.equal(REFERENCE);
+    });
+  });
 });
