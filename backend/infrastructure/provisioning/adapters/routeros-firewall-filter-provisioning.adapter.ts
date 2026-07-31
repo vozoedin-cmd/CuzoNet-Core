@@ -24,6 +24,7 @@ import { RouterOsFilterRuleAmbiguousError } from '../../../domain/provisioning/r
 import { RouterOsFilterRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-conflict.error.js';
 import { RouterOsFilterRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-dynamic.error.js';
 import { RouterOsFilterRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-not-found.error.js';
+import { RouterOsFilterRuleOwnershipError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-ownership.error.js';
 import { RouterOsFilterRulePostconditionError } from '../../../domain/provisioning/routeros/errors/routeros-filter-rule-postcondition.error.js';
 import { RouterOsInvalidFilterRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-filter-rule.error.js';
 import {
@@ -130,6 +131,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
 
     const existing = await this.resolveSingle(client, ruleReference.value);
     if (existing) {
+      this.assertOwned(existing, ruleReference.value);
       // Una regla dinamica ocupa la referencia pero no es administrable: no puede
       // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
       this.assertNotDynamic(existing, ruleReference.value);
@@ -167,6 +169,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   private async handleUpdate(client: RouterOsClientPort, command: RouterOsFilterRuleUpdateInput): Promise<string> {
     const ruleReference = FilterRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
     this.assertNotDynamic(existing, ruleReference.value);
 
     const updateData: MutableFilterRuleUpdateData = {};
@@ -229,6 +232,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
   private async handleMove(client: RouterOsClientPort, command: RouterOsFilterRuleMoveInput): Promise<string> {
     const ruleReference = FilterRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
     this.assertNotDynamic(existing, ruleReference.value);
 
     const rules = await client.listFilterRules();
@@ -246,6 +250,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
 
   private async handleEnable(client: RouterOsClientPort, command: RouterOsFilterRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
@@ -256,6 +261,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
 
   private async handleDisable(client: RouterOsClientPort, command: RouterOsFilterRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
@@ -269,6 +275,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
+    this.assertOwned(existing, command.ruleReference);
     this.assertNotDynamic(existing, command.ruleReference);
     await client.removeFilterRule({ kind: 'id', id: existing.id });
     await this.assertAbsentAfterRemove(client, command.ruleReference);
@@ -303,6 +310,31 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
       );
     }
     return matches[0] ?? null;
+  }
+
+  /**
+   * Solo se muta una regla cuyo marcador de propiedad se lee correctamente y es de esta
+   * instalacion (`valid`).
+   *
+   * Hoy la guarda nunca dispara: `parseOwnership` solo adjunta `ruleReference` al estado
+   * `valid`, y toda operacion resuelve por esa referencia, asi que las reglas ajenas no
+   * llegan hasta aqui. Se deja de forma defensiva para que la garantia sea exigida y no
+   * emergente: si la resolucion se afloja alguna vez, una regla ajena se rechaza en vez de
+   * mutarse en silencio.
+   *
+   * `legacy` y `malformed` tambien se rechazan. Adoptarlas exigiria reescribir su
+   * comentario para reclamar su propiedad, decision de producto que el dominio no ha
+   * tomado.
+   */
+  private assertOwned(rule: ObservedFilterRule, ruleReference: string): void {
+    if (rule.ownership.status === 'valid') {
+      return;
+    }
+    throw new RouterOsFilterRuleOwnershipError(
+      `La regla ${rule.id} resuelta para ${ruleReference} tiene ownership ` +
+        `"${rule.ownership.status}" y no la administra CuzoNet. No se modifican reglas ` +
+        'ajenas ni se reclama su propiedad de forma implicita.',
+    );
   }
 
   /**
@@ -422,6 +454,13 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
     if (error instanceof RouterOsFilterRulePostconditionError) {
       return {
         errorCode: 'ROUTEROS_FILTER_RULE_POSTCONDITION_FAILED',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsFilterRuleOwnershipError) {
+      return {
+        errorCode: 'ROUTEROS_FILTER_RULE_OWNERSHIP_VIOLATION',
         errorMessage: error.message,
         outcome: 'permanentFailure',
       };

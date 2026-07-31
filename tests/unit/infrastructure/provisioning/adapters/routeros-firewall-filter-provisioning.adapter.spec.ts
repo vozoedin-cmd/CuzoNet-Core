@@ -938,6 +938,156 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
     });
   });
 
+  /**
+   * GUARDA DE OWNERSHIP. Hoy es inalcanzable por construccion: parseOwnership solo adjunta
+   * `ruleReference` al estado `valid`, asi que la resolucion por referencia nunca devuelve
+   * una regla ajena (certificado en "ownership reachability").
+   *
+   * La guarda existe como barrera de regresion. Estas pruebas fuerzan justo el escenario
+   * contra el que protege —una resolucion que devuelve una regla no `valid`, como pasaria
+   * si algun dia se buscara por chain+action, por coincidencia aproximada o por `.id`— y
+   * comprueban que la regla ajena se rechaza en lugar de mutarse.
+   */
+  describe('ownership guard (defensive)', () => {
+    const REFERENCE = 'guarded';
+
+    /** Simula una resolucion aflojada que sí devuelve una regla con ownership no `valid`. */
+    function resolveAs(status: 'foreign' | 'malformed' | 'unmanaged' | 'legacy'): void {
+      vi.spyOn(fakeClient, 'findFilterRulesByReference').mockResolvedValue([
+        {
+          action: 'drop',
+          bytes: 0,
+          chain: 'input',
+          disabled: false,
+          dynamic: false,
+          id: '*7',
+          invalid: false,
+          log: false,
+          ownership: { status },
+          packets: 0,
+          physicalIndex: 0,
+        },
+      ]);
+    }
+
+    const STATUSES = ['foreign', 'malformed', 'unmanaged', 'legacy'] as const;
+
+    const MUTATIONS = [
+      ['update', 'updateFilterRule', { protocol: 'udp' }],
+      ['move', 'moveFilterRule', { position: 0 }],
+      ['enable', 'enableFilterRule', {}],
+      ['disable', 'disableFilterRule', {}],
+      ['remove', 'removeFilterRule', {}],
+    ] as const;
+
+    it.each(STATUSES)('refuses every mutation on a %s rule, without touching the router', async (status) => {
+      for (const [operation, clientMethod, payload] of MUTATIONS) {
+        resolveAs(status);
+        const spy = vi.spyOn(fakeClient, clientMethod);
+        const actionType = `routeros.firewall.filter.${operation}`;
+
+        const result = await adapterFor(actionType).execute(
+          input(actionType, { routerId: 'router-1', ruleReference: REFERENCE, ...payload }),
+        );
+
+        expect(result.outcome, `${status}/${operation}`).to.equal('permanentFailure');
+        if (result.outcome === 'permanentFailure') {
+          expect(result.errorCode, `${status}/${operation}`).to.equal(
+            'ROUTEROS_FILTER_RULE_OWNERSHIP_VIOLATION',
+          );
+        }
+        expect(spy, `${status}/${operation}`).not.toHaveBeenCalled();
+        vi.restoreAllMocks();
+      }
+    });
+
+    it.each(STATUSES)('refuses add when the reference resolves to a %s rule', async (status) => {
+      resolveAs(status);
+      const createSpy = vi.spyOn(fakeClient, 'createFilterRule');
+
+      const result = await adapterFor('routeros.firewall.filter.add').execute(
+        input('routeros.firewall.filter.add', {
+          action: 'drop', chain: 'input', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_OWNERSHIP_VIOLATION');
+      }
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it('reports the offending status and rule id in the message', async () => {
+      resolveAs('foreign');
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorMessage).to.contain('foreign');
+        expect(result.errorMessage).to.contain('*7');
+        expect(result.errorMessage).to.contain(REFERENCE);
+      }
+    });
+
+    it('legacy is refused too: adopting a pre-existing rule is an unmade product decision', async () => {
+      resolveAs('legacy');
+
+      const result = await adapterFor('routeros.firewall.filter.update').execute(
+        input('routeros.firewall.filter.update', {
+          protocol: 'udp', routerId: 'router-1', ruleReference: REFERENCE,
+        }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_OWNERSHIP_VIOLATION');
+      }
+    });
+
+    it('a valid rule passes the guard and the operation goes through as usual', async () => {
+      await fakeClient.createFilterRule({
+        action: 'drop', chain: 'input', comment: `cuzonet:firewall-filter:${REFERENCE}`,
+      });
+
+      const result = await adapterFor('routeros.firewall.filter.disable').execute(
+        input('routeros.firewall.filter.disable', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.filterRules[0]?.disabled).to.equal(true);
+    });
+
+    it('ownership is checked before the dynamic guard: a foreign dynamic rule reports ownership', async () => {
+      vi.spyOn(fakeClient, 'findFilterRulesByReference').mockResolvedValue([
+        {
+          action: 'drop',
+          bytes: 0,
+          chain: 'input',
+          disabled: false,
+          dynamic: true,
+          id: '*8',
+          invalid: false,
+          log: false,
+          ownership: { status: 'foreign' },
+          packets: 0,
+          physicalIndex: 0,
+        },
+      ]);
+
+      const result = await adapterFor('routeros.firewall.filter.remove').execute(
+        input('routeros.firewall.filter.remove', { routerId: 'router-1', ruleReference: REFERENCE }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_FILTER_RULE_OWNERSHIP_VIOLATION');
+      }
+    });
+  });
+
   it('rejects an invalid JSON payload', async () => {
     const adapter = adapterFor('routeros.firewall.filter.add');
     const badInput: ProvisioningActionInput = {
