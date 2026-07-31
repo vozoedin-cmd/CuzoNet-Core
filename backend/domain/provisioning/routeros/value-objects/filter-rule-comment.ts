@@ -39,8 +39,12 @@ export class FilterRuleComment {
     return match ? match[1]! : null;
   }
 
+  /**
+   * Clasifica un comentario crudo de RouterOS. Devuelve exactamente cuatro estados; solo
+   * `valid` aporta `ruleReference`, que es lo que hace resoluble a una regla.
+   */
   public static parseOwnership(comment: string | undefined | null): {
-    status: 'valid' | 'legacy' | 'malformed' | 'foreign' | 'unmanaged';
+    status: 'valid' | 'malformed' | 'foreign' | 'unmanaged';
     ruleReference?: string;
     userComment?: string;
   } {

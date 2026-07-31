@@ -764,15 +764,29 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       expect(fakeClient.filterRules[1]?.comment).to.equal('cuzonet:firewall-filter:nueva');
     });
 
-    it('GAP: the legacy status is declared but parseOwnership never returns it', async () => {
-      const comments = ['cuzonet:firewall-filter:x', FOREIGN, MALFORMED, UNMANAGED, ' '];
+    /**
+     * El tipo declara cuatro estados y parseOwnership devuelve exactamente esos cuatro.
+     * Antes declaraba un quinto, `legacy`, que ninguna entrada podia producir; se retiro
+     * al no existir ningun formato de marcador anterior que representara.
+     */
+    it('produces exactly the four declared statuses, and no others', async () => {
+      const comments = [
+        'cuzonet:firewall-filter:x libre',
+        'cuzonet:firewall-filter:y',
+        FOREIGN,
+        'cuzonet:otra-cosa',
+        MALFORMED,
+        'cuzonet:firewall-filter: con espacio',
+        UNMANAGED,
+        ' ',
+      ];
       for (const comment of comments) {
         await fakeClient.createFilterRule({ action: 'drop', chain: 'input', comment });
       }
 
-      const statuses = (await fakeClient.listFilterRules()).map((rule) => rule.ownership.status);
+      const statuses = new Set((await fakeClient.listFilterRules()).map((rule) => rule.ownership.status));
 
-      expect(statuses).not.to.contain('legacy');
+      expect([...statuses].sort()).to.deep.equal(['foreign', 'malformed', 'unmanaged', 'valid']);
     });
   });
 
@@ -952,7 +966,7 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
     const REFERENCE = 'guarded';
 
     /** Simula una resolucion aflojada que sí devuelve una regla con ownership no `valid`. */
-    function resolveAs(status: 'foreign' | 'malformed' | 'unmanaged' | 'legacy'): void {
+    function resolveAs(status: 'foreign' | 'malformed' | 'unmanaged'): void {
       vi.spyOn(fakeClient, 'findFilterRulesByReference').mockResolvedValue([
         {
           action: 'drop',
@@ -970,7 +984,7 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       ]);
     }
 
-    const STATUSES = ['foreign', 'malformed', 'unmanaged', 'legacy'] as const;
+    const STATUSES = ['foreign', 'malformed', 'unmanaged'] as const;
 
     const MUTATIONS = [
       ['update', 'updateFilterRule', { protocol: 'udp' }],
@@ -1032,8 +1046,8 @@ describe('RouterOsFirewallFilterProvisioningAdapter', () => {
       }
     });
 
-    it('legacy is refused too: adopting a pre-existing rule is an unmade product decision', async () => {
-      resolveAs('legacy');
+    it('malformed is refused too: repairing a marker is an unmade product decision', async () => {
+      resolveAs('malformed');
 
       const result = await adapterFor('routeros.firewall.filter.update').execute(
         input('routeros.firewall.filter.update', {

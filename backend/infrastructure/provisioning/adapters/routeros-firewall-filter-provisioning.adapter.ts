@@ -322,7 +322,7 @@ export class RouterOsFirewallFilterProvisioningAdapter extends RouterOsProvision
    * emergente: si la resolucion se afloja alguna vez, una regla ajena se rechaza en vez de
    * mutarse en silencio.
    *
-   * `legacy` y `malformed` tambien se rechazan. Adoptarlas exigiria reescribir su
+   * `malformed` se rechaza igual que las demas. Repararla exigiria reescribir su
    * comentario para reclamar su propiedad, decision de producto que el dominio no ha
    * tomado.
    */

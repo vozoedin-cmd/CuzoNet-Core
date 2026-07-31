@@ -9,7 +9,7 @@
  * coincidencia aproximada, un locator por `.id`—, la regla ajena se rechaza en lugar de
  * mutarse en silencio.
  *
- * `legacy` también se rechaza. Adoptar o reparar una regla preexistente significaría
+ * `malformed` se rechaza igual que `foreign` y `unmanaged`. Repararla significaría
  * reescribir su comentario para reclamar su propiedad, y esa es una decisión de producto
  * que el dominio todavía no ha tomado.
  */

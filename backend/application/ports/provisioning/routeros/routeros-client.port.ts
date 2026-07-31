@@ -238,7 +238,18 @@ export interface RouterOsAddressListEntryUpdateData {
   readonly disabled?: boolean;
 }
 
-export type RouterOsFilterRuleOwnershipStatus = 'valid' | 'legacy' | 'malformed' | 'foreign' | 'unmanaged';
+/**
+ * Clasificación del comentario de una regla de firewall respecto a la propiedad de CuzoNet:
+ *
+ * - `valid`: lleva el marcador `cuzonet:firewall-filter:<ruleReference>` legible. Es el
+ *   único estado que aporta `ruleReference`, y por tanto el único resoluble.
+ * - `malformed`: lleva el prefijo del marcador pero sin referencia utilizable detrás.
+ * - `foreign`: lleva un marcador `cuzonet:` de otro recurso u otra instalación.
+ * - `unmanaged`: sin comentario, o con uno que no pretende ser un marcador.
+ *
+ * Son exactamente los cuatro que `FilterRuleComment.parseOwnership` puede devolver.
+ */
+export type RouterOsFilterRuleOwnershipStatus = 'valid' | 'malformed' | 'foreign' | 'unmanaged';
 
 export interface RouterOsFilterRuleOwnership {
   readonly status: RouterOsFilterRuleOwnershipStatus;
