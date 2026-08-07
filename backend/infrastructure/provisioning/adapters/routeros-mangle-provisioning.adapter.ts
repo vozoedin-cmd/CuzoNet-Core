@@ -7,6 +7,7 @@ import type {
   RouterOsMangleRuleCreateData,
   RouterOsMangleRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
+import { ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../../application/ports/provisioning/routeros/secret-provider.port.js';
 import { ConnectionState } from '../../../domain/provisioning/routeros/value-objects/connection-state.js';
 import { FirewallAddressSpec } from '../../../domain/provisioning/routeros/value-objects/firewall-address-spec.js';
@@ -19,8 +20,12 @@ import { MangleRuleReference } from '../../../domain/provisioning/routeros/value
 import { PortSpecification } from '../../../domain/provisioning/routeros/value-objects/port-specification.js';
 import { Protocol } from '../../../domain/provisioning/routeros/value-objects/protocol.js';
 import { RouterOsInvalidMangleRuleError } from '../../../domain/provisioning/routeros/errors/routeros-invalid-mangle-rule.error.js';
+import { RouterOsMangleRuleAmbiguousError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-ambiguous.error.js';
 import { RouterOsMangleRuleConflictError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-conflict.error.js';
+import { RouterOsMangleRuleDynamicError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-dynamic.error.js';
 import { RouterOsMangleRuleNotFoundError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-not-found.error.js';
+import { RouterOsMangleRuleOwnershipError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-ownership.error.js';
+import { RouterOsMangleRulePostconditionError } from '../../../domain/provisioning/routeros/errors/routeros-mangle-rule-postcondition.error.js';
 import {
   routerOsMangleRuleInputSchema,
   type RouterOsMangleRuleAddInput,
@@ -102,8 +107,12 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     this.assertCoherent(desired.action, desired);
     const comment = MangleRuleComment.create(ruleReference, command.comment);
 
-    const existing = (await client.findMangleRulesByReference(ruleReference.value))[0];
+    const existing = await this.resolveSingle(client, ruleReference.value);
     if (existing) {
+      this.assertOwned(existing, ruleReference.value);
+      // Una regla dinamica ocupa la referencia pero no es administrable: no puede
+      // considerarse idempotencia (desaparecera sola) ni conflicto resoluble.
+      this.assertNotDynamic(existing, ruleReference.value);
       if (this.isEquivalent(existing, desired)) {
         return ruleReference.value; // Idempotent success
       }
@@ -138,12 +147,15 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
       ...(desired.srcPort !== undefined ? { srcPort: desired.srcPort } : {}),
     };
     await client.createMangleRule(createData);
+    await this.assertExactlyOneEquivalentAfterCreate(client, ruleReference.value, desired);
     return ruleReference.value;
   }
 
   private async handleUpdate(client: RouterOsClientPort, command: RouterOsMangleRuleUpdateInput): Promise<string> {
     const ruleReference = MangleRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const resultingAction = command.action !== undefined ? MangleAction.create(command.action).value : existing.action;
     const resultingMarks = {
@@ -237,6 +249,8 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
   private async handleMove(client: RouterOsClientPort, command: RouterOsMangleRuleMoveInput): Promise<string> {
     const ruleReference = MangleRuleReference.create(command.ruleReference);
     const existing = await this.findOrThrow(client, ruleReference.value);
+    this.assertOwned(existing, ruleReference.value);
+    this.assertNotDynamic(existing, ruleReference.value);
 
     const rules = await client.listMangleRules();
     const target = resolveMoveTarget(rules, existing.id, command.position);
@@ -253,6 +267,8 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
 
   private async handleEnable(client: RouterOsClientPort, command: RouterOsMangleRuleEnableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (!existing.disabled) {
       return command.ruleReference; // Idempotent success: already enabled
     }
@@ -262,6 +278,8 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
 
   private async handleDisable(client: RouterOsClientPort, command: RouterOsMangleRuleDisableInput): Promise<string> {
     const existing = await this.findOrThrow(client, command.ruleReference);
+    this.assertOwned(existing, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     if (existing.disabled) {
       return command.ruleReference; // Idempotent success: already disabled
     }
@@ -270,20 +288,119 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
   }
 
   private async handleRemove(client: RouterOsClientPort, command: RouterOsMangleRuleRemoveInput): Promise<string> {
-    const existing = (await client.findMangleRulesByReference(command.ruleReference))[0];
+    const existing = await this.resolveSingle(client, command.ruleReference);
     if (!existing) {
       return command.ruleReference; // Idempotent success: already gone
     }
+    this.assertOwned(existing, command.ruleReference);
+    this.assertNotDynamic(existing, command.ruleReference);
     await client.removeMangleRule({ kind: 'id', id: existing.id });
+    await this.assertAbsentAfterRemove(client, command.ruleReference);
     return command.ruleReference;
   }
 
   private async findOrThrow(client: RouterOsClientPort, ruleReference: string): Promise<ObservedMangleRule> {
-    const existing = (await client.findMangleRulesByReference(ruleReference))[0];
+    const existing = await this.resolveSingle(client, ruleReference);
     if (!existing) {
       throw new RouterOsMangleRuleNotFoundError(`Regla Mangle no encontrada para la referencia: ${ruleReference}`);
     }
     return existing;
+  }
+
+  /**
+   * Resuelve una referencia administrada exigiendo como maximo una coincidencia.
+   *
+   * RouterOS no impone unicidad sobre el marcador del comentario, asi que dos reglas Mangle
+   * pueden compartir referencia tras una duplicacion manual o una importacion. Quedarse con
+   * la primera es peor aqui que en otros recursos: el marcado depende de la posicion en la
+   * cadena y de `passthrough`, asi que operar sobre una de dos gemelas deja marcado un
+   * trafico que se creia desmarcado, e informa exito igualmente.
+   */
+  private async resolveSingle(
+    client: RouterOsClientPort,
+    ruleReference: string,
+  ): Promise<ObservedMangleRule | null> {
+    const matches = await client.findMangleRulesByReference(ruleReference);
+    if (matches.length > 1) {
+      throw new RouterOsMangleRuleAmbiguousError(
+        `La referencia ${ruleReference} resuelve a ${matches.length} reglas Mangle en el router ` +
+          `(${matches.map((rule) => rule.id).join(', ')}). No se opera sobre una eleccion ` +
+          'arbitraria: resuelva la duplicidad en el router antes de reintentar.',
+      );
+    }
+    return matches[0] ?? null;
+  }
+
+  /**
+   * Solo se muta una regla Mangle cuyo marcador de propiedad se lee correctamente y es de
+   * esta instalacion (`valid`). Ver `RouterOsMangleRuleOwnershipError` para por que la
+   * guarda es defensiva y aun asi se exige.
+   */
+  private assertOwned(rule: ObservedMangleRule, ruleReference: string): void {
+    if (rule.ownership.status === 'valid') {
+      return;
+    }
+    throw new RouterOsMangleRuleOwnershipError(
+      `La regla Mangle ${rule.id} resuelta para ${ruleReference} tiene ownership ` +
+        `"${rule.ownership.status}" y no la administra CuzoNet. No se modifican reglas ` +
+        'ajenas ni se reclama su propiedad de forma implicita.',
+    );
+  }
+
+  /** Las reglas `dynamic=true` las gobierna RouterOS. La guarda corta antes de enviar comando alguno. */
+  private assertNotDynamic(rule: ObservedMangleRule, ruleReference: string): void {
+    if (!rule.dynamic) {
+      return;
+    }
+    throw new RouterOsMangleRuleDynamicError(
+      `La regla Mangle ${ruleReference} (${rule.id}) es dinamica y la administra RouterOS, no ` +
+        'CuzoNet. Las reglas dinamicas no se pueden crear, modificar, mover, habilitar, ' +
+        'deshabilitar ni eliminar desde el aprovisionamiento.',
+    );
+  }
+
+  /**
+   * Postcondicion de `create`: releer y confirmar que la referencia quedo en exactamente una
+   * regla Y que esa regla es la pedida. Cero significa que el router acepto el comando pero
+   * no persistio nada; dos o mas, que se creo un duplicado y toda operacion posterior sobre
+   * esa referencia seria ambigua. La comprobacion de equivalencia es propia de Mangle: el
+   * router normaliza y completa campos al aceptar la regla, y una regla que quedo distinta
+   * marca un trafico distinto del pedido mientras el sistema informa exito.
+   */
+  private async assertExactlyOneEquivalentAfterCreate(
+    client: RouterOsClientPort,
+    ruleReference: string,
+    desired: DesiredMangleRuleFields,
+  ): Promise<void> {
+    const matches = await client.findMangleRulesByReference(ruleReference);
+    if (matches.length !== 1) {
+      throw new RouterOsMangleRulePostconditionError(
+        matches.length === 0
+          ? `El router acepto la creacion de la regla Mangle ${ruleReference} pero no existe al releer.`
+          : `La creacion de la regla Mangle ${ruleReference} dejo ${matches.length} reglas con la ` +
+            `misma referencia (${matches.map((rule) => rule.id).join(', ')}).`,
+      );
+    }
+    const created = matches[0]!;
+    if (!this.isEquivalent(created, desired)) {
+      throw new RouterOsMangleRulePostconditionError(
+        `El router acepto la creacion de la regla Mangle ${ruleReference} (${created.id}) pero al ` +
+          'releer no coincide con lo solicitado. La regla marcaria un trafico distinto del pedido.',
+      );
+    }
+  }
+
+  /** Postcondicion de `remove`: releer y confirmar que no queda ninguna regla con la referencia. */
+  private async assertAbsentAfterRemove(client: RouterOsClientPort, ruleReference: string): Promise<void> {
+    const matches = await client.findMangleRulesByReference(ruleReference);
+    if (matches.length === 0) {
+      return;
+    }
+    throw new RouterOsMangleRulePostconditionError(
+      `El router acepto la eliminacion de la regla Mangle ${ruleReference} pero al releer siguen ` +
+        `existiendo ${matches.length} reglas con esa referencia ` +
+        `(${matches.map((rule) => rule.id).join(', ')}).`,
+    );
   }
 
   /** Enforces that mark-connection/mark-packet/mark-routing each carry their required new-*-mark field. */
@@ -325,6 +442,16 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
     };
   }
 
+  /**
+   * Compara la regla observada con la deseada.
+   *
+   * `passthrough` NO se puede comparar como los demas campos opcionales. RouterOS 7.21.4 lo
+   * materializa siempre —la sonda de la Fase 0 lo devolvio en el 100% de las reglas—, asi
+   * que omitirlo en el payload no significa "sin valor" sino "el default del router". Antes
+   * se comparaba `true === undefined` y toda re-ejecucion de un `add` que no declarara
+   * `passthrough` se reportaba como conflicto en vez de como idempotencia: contra el router
+   * real, siempre. Un payload que lo omite equivale al default documentado.
+   */
   private isEquivalent(existing: ObservedMangleRule, desired: DesiredMangleRuleFields): boolean {
     return (
       existing.chain === desired.chain &&
@@ -343,7 +470,7 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
       (existing.newConnectionMark ?? '') === (desired.newConnectionMark ?? '') &&
       (existing.newPacketMark ?? '') === (desired.newPacketMark ?? '') &&
       (existing.newRoutingMark ?? '') === (desired.newRoutingMark ?? '') &&
-      (existing.passthrough ?? undefined) === (desired.passthrough ?? undefined) &&
+      existing.passthrough === (desired.passthrough ?? ROUTEROS_MANGLE_RULE_DEFAULTS.passthrough) &&
       existing.disabled === desired.disabled
     );
   }
@@ -363,6 +490,34 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
         outcome: 'permanentFailure',
       };
     }
+    if (error instanceof RouterOsMangleRuleAmbiguousError) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_AMBIGUOUS',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsMangleRuleDynamicError) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_DYNAMIC',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsMangleRulePostconditionError) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_POSTCONDITION_FAILED',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
+    if (error instanceof RouterOsMangleRuleOwnershipError) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_OWNERSHIP_VIOLATION',
+        errorMessage: error.message,
+        outcome: 'permanentFailure',
+      };
+    }
     if (error instanceof RouterOsMangleRuleNotFoundError) {
       return {
         errorCode: 'ROUTEROS_MANGLE_RULE_NOT_FOUND',
@@ -377,15 +532,32 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
         outcome: 'permanentFailure',
       };
     }
+    return this.mapTrapError(error);
+  }
+
+  /**
+   * Traduce el `!trap` de RouterOS a partir de los mensajes CERTIFICADOS en la Fase 3, no de
+   * heuristicas.
+   *
+   * El mapeo anterior exigia la palabra "invalid" en el mensaje, y RouterOS casi nunca la
+   * usa: rechaza un valor con `input does not match any value of <parametro>`. En la
+   * practica eso mandaba los rechazos de validacion mas frecuentes —accion, chain, protocolo,
+   * interfaz, marca de enrutamiento— al fallback generico, indistinguibles de un fallo real
+   * del router.
+   *
+   * Se reconoce solo lo que la suite de wire protocol fija; el resto cae al fallback
+   * `ROUTEROS_EXECUTION_FAILED`, que es la respuesta honesta ante un mensaje no observado.
+   */
+  private mapTrapError(error: unknown): ProvisioningActionResult {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
-    if (
-      message.includes('invalid') &&
-      (message.includes('interface') ||
-        message.includes('protocol') ||
-        message.includes('address') ||
-        message.includes('chain') ||
-        message.includes('mark'))
-    ) {
+
+    // El router valido el payload y lo rechazo: reenviarlo tal cual dara siempre lo mismo.
+    const isValidationTrap =
+      message.includes('input does not match any value of') ||
+      message.includes('invalid value for argument') ||
+      message.includes('unknown parameter') ||
+      message.includes('chain does not exist');
+    if (isValidationTrap) {
       const invalid = new RouterOsInvalidMangleRuleError(
         error instanceof Error ? error.message : 'Regla Mangle inválida.',
       );
@@ -395,6 +567,26 @@ export class RouterOsMangleProvisioningAdapter extends RouterOsProvisioningAdapt
         outcome: 'permanentFailure',
       };
     }
+
+    // La regla se resolvio y desaparecio antes de que el comando llegara a ejecutarse, o el
+    // destino de un `/move` ya no existe.
+    if (message.includes('no such item')) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_NOT_FOUND',
+        errorMessage: error instanceof Error ? error.message : 'Regla Mangle no encontrada en el router.',
+        outcome: 'permanentFailure',
+      };
+    }
+
+    if (message.includes('already have such entry')) {
+      return {
+        errorCode: 'ROUTEROS_MANGLE_RULE_CONFLICT',
+        errorMessage: error instanceof Error ? error.message : 'La regla Mangle ya existe en el router.',
+        outcome: 'permanentFailure',
+      };
+    }
+
+    // Incluye el `failure` pelado: sin mas evidencia no se clasifica.
     return this.mapGenericExecutionError(error);
   }
 }
