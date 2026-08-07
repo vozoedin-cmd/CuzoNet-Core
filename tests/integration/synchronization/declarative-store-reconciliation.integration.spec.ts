@@ -148,6 +148,74 @@ describe('Declarative desired-state store driving the Synchronization Engine end
     expect(plan.items[0]?.differingFields).to.deep.equal(['protocol']);
   });
 
+  /**
+   * El almacen declarativo guarda lo que el operador declaro, tal cual. Si omite un campo
+   * que el router materializa siempre, la regla quedaria en drift permanente e IRREPARABLE:
+   * volver a declarar lo mismo no cambia nada porque el router ya esta como se pidio.
+   * `passthrough` de Mangle es el unico caso confirmado.
+   */
+  describe('Mangle passthrough default in the declarative store', () => {
+    async function declare(desiredFields: Record<string, string>): Promise<void> {
+      await setState.execute({
+        desiredFields,
+        reference: 'marca-voip',
+        resourceType: 'mangle-rule',
+        routerId: 'router-1',
+      });
+    }
+
+    async function onRouter(extra: Record<string, unknown> = {}): Promise<void> {
+      fakeClient.closed = false;
+      await fakeClient.createMangleRule({
+        action: 'mark-connection',
+        chain: 'prerouting',
+        comment: 'cuzonet:firewall-mangle:marca-voip',
+        newConnectionMark: 'voip-conn',
+        ...extra,
+      });
+    }
+
+    const DECLARED = { action: 'mark-connection', chain: 'prerouting', newConnectionMark: 'voip-conn' };
+
+    it('is in_sync when the declaration omits passthrough and the router materialised true', async () => {
+      await declare(DECLARED);
+      await onRouter();
+
+      const plan = await generatePlan.execute({ resourceTypes: ['mangle-rule'], routerId: 'router-1' });
+
+      expect(plan.items[0]).to.include({ reference: 'marca-voip', status: 'in_sync' });
+      expect(plan.summary.isConverged).to.equal(true);
+    });
+
+    it('still drifts when the declaration omits passthrough and the router has false', async () => {
+      await declare(DECLARED);
+      await onRouter({ passthrough: false });
+
+      const plan = await generatePlan.execute({ resourceTypes: ['mangle-rule'], routerId: 'router-1' });
+
+      expect(plan.items[0]?.status).to.equal('drifted');
+      expect(plan.items[0]?.differingFields).to.deep.equal(['passthrough']);
+    });
+
+    it('respects an explicitly declared passthrough=false', async () => {
+      await declare({ ...DECLARED, passthrough: 'false' });
+      await onRouter({ passthrough: false });
+
+      const plan = await generatePlan.execute({ resourceTypes: ['mangle-rule'], routerId: 'router-1' });
+
+      expect(plan.items[0]?.status).to.equal('in_sync');
+    });
+
+    it('does not report a dynamic Mangle rule the operator never declared', async () => {
+      await onRouter();
+      fakeClient.mangleRules = fakeClient.mangleRules.map((rule) => ({ ...rule, dynamic: true }));
+
+      const plan = await generatePlan.execute({ resourceTypes: ['mangle-rule'], routerId: 'router-1' });
+
+      expect(plan.items).to.deep.equal([]);
+    });
+  });
+
   it('reports unexpected once a declared resource is removed from the store but the router was never cleaned up', async () => {
     await setState.execute({
       desiredFields: { action: 'drop', chain: 'input' },

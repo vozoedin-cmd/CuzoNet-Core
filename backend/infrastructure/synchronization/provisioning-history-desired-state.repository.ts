@@ -4,6 +4,7 @@ import type { ProvisioningRequestRepository } from '../../application/ports/prov
 import type { NormalizedResourceRecord } from '../../domain/synchronization/normalized-resource-record.js';
 import type { SyncResourceType } from '../../domain/synchronization/sync-resource-type.js';
 import { extractRouterId, splitActionType } from '../../application/use-cases/provisioning/shared/provisioning-event-parsing.util.js';
+import { withDesiredFieldDefaults } from './desired-field-defaults.js';
 import { RULE_FIELD_NAMES } from './rule-field-names.js';
 
 interface MutableDesiredRecord {
@@ -226,7 +227,14 @@ export class ProvisioningHistoryDesiredStateRepository implements DesiredStateRe
     const records: NormalizedResourceRecord[] = [];
     for (const [reference, record] of byReference) {
       if (record === null) continue; // Tombstoned: no longer desired
-      records.push({ disabled: record.disabled, fields: record.fields, reference });
+      // Los defaults se aplican al emitir, no al replicar cada acción: así un `add` que
+      // omitió el campo y un `update` posterior que tampoco lo menciona acaban igual, y un
+      // valor declarado explícitamente en cualquier punto del historial sigue ganando.
+      records.push({
+        disabled: record.disabled,
+        fields: withDesiredFieldDefaults(resourceType, record.fields),
+        reference,
+      });
     }
     return records;
   }

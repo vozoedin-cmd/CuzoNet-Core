@@ -272,6 +272,221 @@ describe('ProvisioningHistoryDesiredStateRepository', () => {
     expect(desired?.fields).to.include({ newConnectionMark: 'voip-conn', passthrough: 'true' });
   });
 
+  /**
+   * Asimetria corregida. El estado real SIEMPRE trae `passthrough` porque el router lo
+   * materializa; el deseado puede omitirlo. Sin el default, una regla creada sin declarar
+   * `passthrough` quedaba en drift permanente e irreparable: reaplicarla no cambia nada
+   * porque el router ya esta como se pidio. Misma lectura que `isEquivalent` del adapter.
+   */
+  describe('Mangle passthrough default', () => {
+    async function mangleHistory(
+      steps: readonly { at: string; operation: string; payload: Record<string, unknown> }[],
+    ): Promise<void> {
+      for (const step of steps) {
+        await requestRepo.save(
+          completedRequest({
+            actionType: `routeros.firewall.mangle.${step.operation}`,
+            completedAt: new Date(step.at),
+            payload: { routerId: 'router-1', ruleReference: 'marca', ...step.payload },
+          }),
+        );
+      }
+    }
+
+    const ADD = {
+      action: 'mark-packet',
+      chain: 'forward',
+      newPacketMark: 'bulk',
+    };
+
+    it('materialises passthrough=true when the add never declared it', async () => {
+      await mangleHistory([{ at: '2026-07-01T00:00:00.000Z', operation: 'add', payload: ADD }]);
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.fields.passthrough).to.equal('true');
+    });
+
+    it('preserves an explicit passthrough=false instead of defaulting it', async () => {
+      await mangleHistory([
+        { at: '2026-07-01T00:00:00.000Z', operation: 'add', payload: { ...ADD, passthrough: false } },
+      ]);
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.fields.passthrough).to.equal('false');
+    });
+
+    it('lets a later update turn passthrough off, and back on', async () => {
+      await mangleHistory([
+        { at: '2026-07-01T00:00:00.000Z', operation: 'add', payload: ADD },
+        { at: '2026-07-02T00:00:00.000Z', operation: 'update', payload: { passthrough: false } },
+      ]);
+
+      expect((await repository.getDesiredState('company-1', 'router-1', 'mangle-rule'))[0]?.fields.passthrough)
+        .to.equal('false');
+
+      await mangleHistory([
+        { at: '2026-07-03T00:00:00.000Z', operation: 'update', payload: { passthrough: true } },
+      ]);
+
+      expect((await repository.getDesiredState('company-1', 'router-1', 'mangle-rule'))[0]?.fields.passthrough)
+        .to.equal('true');
+    });
+
+    /** El default no debe pisar un `false` que ya estaba en el registro por un update anterior. */
+    it('does not re-default passthrough on an update that does not mention it', async () => {
+      await mangleHistory([
+        { at: '2026-07-01T00:00:00.000Z', operation: 'add', payload: { ...ADD, passthrough: false } },
+        { at: '2026-07-02T00:00:00.000Z', operation: 'update', payload: { newPacketMark: 'otra' } },
+      ]);
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.fields).to.include({ newPacketMark: 'otra', passthrough: 'false' });
+    });
+
+    it('only defaults Mangle: a Filter rule keeps no passthrough field at all', async () => {
+      await requestRepo.save(
+        completedRequest({
+          actionType: 'routeros.firewall.filter.add',
+          completedAt: new Date('2026-07-01T00:00:00.000Z'),
+          payload: { action: 'accept', chain: 'forward', routerId: 'router-1', ruleReference: 'f1' },
+        }),
+      );
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'filter-rule');
+
+      expect(desired?.fields).to.not.have.property('passthrough');
+    });
+  });
+
+  describe('Mangle desired-state replay', () => {
+    const BASE = {
+      action: 'mark-connection',
+      chain: 'prerouting',
+      newConnectionMark: 'voip-conn',
+      protocol: 'udp',
+      routerId: 'router-1',
+      ruleReference: 'marca-voip',
+    };
+
+    async function save(operation: string, payload: Record<string, unknown>, at: string): Promise<void> {
+      await requestRepo.save(
+        completedRequest({
+          actionType: `routeros.firewall.mangle.${operation}`,
+          completedAt: new Date(at),
+          payload: { routerId: 'router-1', ruleReference: 'marca-voip', ...payload },
+        }),
+      );
+    }
+
+    it('derives exactly the comparable fields from a full add payload', async () => {
+      await save('add', {
+        ...BASE,
+        comment: 'comentario del operador',
+        connectionMark: 'CM',
+        connectionState: 'new',
+        dstAddress: '10.0.0.0/8',
+        dstPort: '443',
+        inInterface: 'ether1',
+        newPacketMark: 'NPM',
+        newRoutingMark: 'main',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        passthrough: true,
+        srcAddress: '192.168.1.0/24',
+        srcPort: '1024-65535',
+      }, '2026-07-01T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.fields).to.deep.equal({
+        action: 'mark-connection',
+        chain: 'prerouting',
+        connectionMark: 'CM',
+        connectionState: 'new',
+        dstAddress: '10.0.0.0/8',
+        dstPort: '443',
+        inInterface: 'ether1',
+        newConnectionMark: 'voip-conn',
+        newPacketMark: 'NPM',
+        newRoutingMark: 'main',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        passthrough: 'true',
+        protocol: 'udp',
+        srcAddress: '192.168.1.0/24',
+        srcPort: '1024-65535',
+      });
+      // El comentario tecnico y el de usuario quedan fuera del estado deseado de una regla.
+      expect(desired?.fields).to.not.have.property('comment');
+      expect(desired?.reference).to.equal('marca-voip');
+    });
+
+    it('an update patches only what it declares and preserves the rest', async () => {
+      await save('add', BASE, '2026-07-01T00:00:00.000Z');
+      await save('update', { protocol: 'tcp' }, '2026-07-02T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.fields).to.include({
+        action: 'mark-connection',
+        chain: 'prerouting',
+        newConnectionMark: 'voip-conn',
+        protocol: 'tcp',
+      });
+    });
+
+    it.each([
+      ['disable', true],
+      ['enable', false],
+    ] as const)('%s flips the disabled flag without touching the fields', async (operation, expected) => {
+      await save('add', { ...BASE, disabled: !expected }, '2026-07-01T00:00:00.000Z');
+      await save(operation, {}, '2026-07-02T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      expect(desired?.disabled).to.equal(expected);
+      expect(desired?.fields).to.include({ newConnectionMark: 'voip-conn' });
+    });
+
+    it('a remove tombstones the reference: the rule is no longer desired', async () => {
+      await save('add', BASE, '2026-07-01T00:00:00.000Z');
+      await save('remove', {}, '2026-07-02T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'mangle-rule')).to.deep.equal([]);
+    });
+
+    it('an add after a remove desires the rule again', async () => {
+      await save('add', BASE, '2026-07-01T00:00:00.000Z');
+      await save('remove', {}, '2026-07-02T00:00:00.000Z');
+      await save('add', BASE, '2026-07-03T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'mangle-rule')).to.have.length(1);
+    });
+
+    /**
+     * El orden no es declarativo todavia: `desiredPosition` existe en el almacen pero ni el
+     * lector ni el comparador lo usan. Un `move` no puede, por tanto, cambiar nada
+     * comparable — si lo hiciera, inventaria drift sobre un eje que nadie reconcilia.
+     */
+    it('a move leaves every comparable field untouched', async () => {
+      await save('add', BASE, '2026-07-01T00:00:00.000Z');
+      const before = await repository.getDesiredState('company-1', 'router-1', 'mangle-rule');
+
+      await save('move', { position: 0 }, '2026-07-02T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'mangle-rule')).to.deep.equal(before);
+    });
+
+    it('an update before any add never resurrects a rule', async () => {
+      await save('update', { protocol: 'tcp' }, '2026-07-01T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'mangle-rule')).to.deep.equal([]);
+    });
+  });
+
   it('only considers requests for the requested router', async () => {
     await requestRepo.save(
       completedRequest({

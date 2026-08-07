@@ -135,6 +135,119 @@ describe('RouterOsActualStateReader', () => {
     expect(records[0]?.fields).to.include({ newConnectionMark: 'voip-conn', passthrough: 'true' });
   });
 
+  /**
+   * Fija la proyeccion exacta de una regla Mangle: los 17 campos comparables y NADA mas.
+   * Un campo de solo lectura colado aqui —`bytes`, `packets`, `dynamic`— dejaria toda regla
+   * con trafico en drift permanente.
+   */
+  it('projects exactly the comparable Mangle fields, and no read-only or identity ones', async () => {
+    await fakeClient.createMangleRule({
+      action: 'mark-routing',
+      chain: 'prerouting',
+      comment: 'cuzonet:firewall-mangle:full comentario del operador',
+      connectionMark: 'CM',
+      connectionState: 'new',
+      dstAddress: '10.0.0.0/8',
+      dstPort: '443',
+      inInterface: 'ether1',
+      newConnectionMark: 'NCM',
+      newPacketMark: 'NPM',
+      newRoutingMark: 'main',
+      outInterface: 'ether2',
+      packetMark: 'PM',
+      passthrough: false,
+      protocol: 'tcp',
+      routingMark: 'RM',
+      srcAddress: '192.168.1.0/24',
+      srcPort: '1024-65535',
+    });
+
+    const [record] = await reader.readActualState('company-1', 'router-1', 'mangle-rule');
+
+    expect(record?.fields).to.deep.equal({
+      action: 'mark-routing',
+      chain: 'prerouting',
+      connectionMark: 'CM',
+      connectionState: 'new',
+      dstAddress: '10.0.0.0/8',
+      dstPort: '443',
+      inInterface: 'ether1',
+      newConnectionMark: 'NCM',
+      newPacketMark: 'NPM',
+      newRoutingMark: 'main',
+      outInterface: 'ether2',
+      packetMark: 'PM',
+      passthrough: 'false',
+      protocol: 'tcp',
+      routingMark: 'RM',
+      srcAddress: '192.168.1.0/24',
+      srcPort: '1024-65535',
+    });
+    // `disabled` se compara, pero como campo propio del record, no dentro de `fields`.
+    expect(record?.disabled).to.equal(false);
+    expect(record?.reference).to.equal('full');
+  });
+
+  it('materialises passthrough on both sides of the boolean', async () => {
+    await fakeClient.createMangleRule({
+      action: 'mark-packet', chain: 'forward', comment: 'cuzonet:firewall-mangle:a', newPacketMark: 'p',
+    });
+    await fakeClient.createMangleRule({
+      action: 'mark-packet', chain: 'forward', comment: 'cuzonet:firewall-mangle:b', newPacketMark: 'p',
+      passthrough: false,
+    });
+
+    const records = await reader.readActualState('company-1', 'router-1', 'mangle-rule');
+
+    expect(records.map((r) => r.fields.passthrough)).to.deep.equal(['true', 'false']);
+  });
+
+  /**
+   * Mismo criterio que en address-list: una regla dinamica la gobierna RouterOS, no persiste
+   * y desaparece sola, asi que CuzoNet no puede haberla deseado. Incluirla la mostraria como
+   * `unexpected` e inventaria una divergencia.
+   */
+  it('excludes dynamic Mangle rules from the actual state', async () => {
+    await fakeClient.createMangleRule({
+      action: 'mark-packet', chain: 'forward', comment: 'cuzonet:firewall-mangle:estatica', newPacketMark: 'p',
+    });
+    await fakeClient.createMangleRule({
+      action: 'mark-connection', chain: 'prerouting', comment: 'generada por el router', newConnectionMark: 'c',
+    });
+    fakeClient.mangleRules[1] = { ...fakeClient.mangleRules[1]!, dynamic: true };
+
+    const records = await reader.readActualState('company-1', 'router-1', 'mangle-rule');
+
+    expect(records).to.have.length(1);
+    expect(records[0]?.reference).to.equal('estatica');
+  });
+
+  it('returns nothing when every Mangle rule on the router is dynamic', async () => {
+    await fakeClient.createMangleRule({
+      action: 'mark-packet', chain: 'forward', comment: 'x', newPacketMark: 'p',
+    });
+    fakeClient.mangleRules = fakeClient.mangleRules.map((rule) => ({ ...rule, dynamic: true }));
+
+    expect(await reader.readActualState('company-1', 'router-1', 'mangle-rule')).to.deep.equal([]);
+  });
+
+  /**
+   * Una regla sin marcador administrado valido no tiene identidad de negocio: se reporta con
+   * una referencia sintetica derivada del `.id`, que la deja siempre como `unexpected` y
+   * nunca la hace coincidir con nada deseado.
+   */
+  it.each([
+    ['unmanaged', 'puesta a mano por el operador'],
+    ['foreign', 'cuzonet:firewall-nat:otra-cosa'],
+    ['malformed', 'cuzonet:firewall-mangle:'],
+  ])('gives a %s Mangle rule a synthetic reference instead of a managed one', async (_status, comment) => {
+    await fakeClient.createMangleRule({ action: 'passthrough', chain: 'forward', comment });
+
+    const [record] = await reader.readActualState('company-1', 'router-1', 'mangle-rule');
+
+    expect(record?.reference).to.match(/^unmanaged:/);
+  });
+
   it('closes the client after reading, even across resource types', async () => {
     await reader.readActualState('company-1', 'router-1', 'simple-queue');
     expect(fakeClient.closed).to.equal(true);

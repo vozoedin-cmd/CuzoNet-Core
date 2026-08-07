@@ -94,6 +94,23 @@ function normalizeNatRule(rule: ObservedNatRule): NormalizedResourceRecord {
   };
 }
 
+/**
+ * Una regla Mangle `dynamic=true` la gobierna RouterOS: no se guarda en la configuración y
+ * desaparece sola. Mismo criterio que en las entradas de address-list, y por la misma razón:
+ * incluirla la mostraría como `unexpected` —CuzoNet nunca puede haberla deseado— inventando
+ * una divergencia, y contradiría al aprovisionamiento, que desde la Fase 4 se niega a
+ * crearla, modificarla, moverla, habilitarla, deshabilitarla o eliminarla.
+ *
+ * GAP conocido y acotado: si una regla dinámica llevara un marcador administrado válido,
+ * excluirla dejaría su referencia como `missing` en vez de `in_sync`. No se ha observado —
+ * las dinámicas las genera el router con sus propios comentarios, nunca con el marcador de
+ * CuzoNet— y la guarda `ROUTEROS_MANGLE_RULE_DYNAMIC` del adapter es el respaldo si algún
+ * día un apply intentara actuar sobre ella.
+ */
+function isManageableMangleRule(rule: ObservedMangleRule): boolean {
+  return !rule.dynamic;
+}
+
 function normalizeMangleRule(rule: ObservedMangleRule): NormalizedResourceRecord {
   return {
     disabled: rule.disabled,
@@ -128,7 +145,9 @@ export class RouterOsActualStateReader implements ActualStateReader {
         case 'nat-rule':
           return (await client.listNatRules()).map(normalizeNatRule);
         case 'mangle-rule':
-          return (await client.listMangleRules()).map(normalizeMangleRule);
+          return (await client.listMangleRules())
+            .filter(isManageableMangleRule)
+            .map(normalizeMangleRule);
       }
     } finally {
       await client.close().catch(() => {
