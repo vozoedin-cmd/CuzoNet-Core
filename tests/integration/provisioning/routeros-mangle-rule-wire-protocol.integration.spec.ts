@@ -369,6 +369,65 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
       });
     });
 
+    it('writes disabled as the yes/no wire flag in both directions, and omits it when undecided', async () => {
+      await withClient(async (client) => {
+        await client.createMangleRule({
+          action: 'mark-packet', chain: 'forward', comment: 'a', disabled: true, newPacketMark: 'p',
+        });
+        await client.createMangleRule({
+          action: 'mark-packet', chain: 'forward', comment: 'b', disabled: false, newPacketMark: 'p',
+        });
+        await client.createMangleRule({
+          action: 'mark-packet', chain: 'forward', comment: 'c', newPacketMark: 'p',
+        });
+      });
+
+      expect(harness.captured[0]?.attributes.disabled).toBe('yes');
+      expect(harness.captured[1]?.attributes.disabled).toBe('no');
+      expect(harness.captured[2]?.attributes).not.toHaveProperty('disabled');
+    });
+
+    /**
+     * La marca de enrutamiento va como `new-routing-mark`, la nomenclatura que la sonda de la
+     * Fase 0 observo en 7.21.4. `routing-mark` existe pero es el MATCHER, no el efecto: solo
+     * se envia si el llamador lo pide, y `routing-table` no se usa en este recurso.
+     */
+    it('writes the routing mark as new-routing-mark and never as a routing table', async () => {
+      await withClient((client) =>
+        client.createMangleRule({
+          action: 'mark-routing',
+          chain: 'prerouting',
+          comment: 'cuzonet:firewall-mangle:routing',
+          newRoutingMark: 'main',
+        }),
+      );
+
+      const attributes = harness.captured[0]?.attributes ?? {};
+      expect(attributes['new-routing-mark']).toBe('main');
+      expect(attributes).not.toHaveProperty('routing-table');
+      expect(attributes).not.toHaveProperty('new-routing-table');
+      expect(attributes).not.toHaveProperty('routing-mark');
+    });
+
+    it('sends the three mark fields under their RouterOS names when all are requested', async () => {
+      await withClient((client) =>
+        client.createMangleRule({
+          action: 'mark-packet',
+          chain: 'forward',
+          comment: 'cuzonet:firewall-mangle:marks',
+          newConnectionMark: 'NCM',
+          newPacketMark: 'NPM',
+          newRoutingMark: 'main',
+        }),
+      );
+
+      expect(harness.captured[0]?.attributes).toMatchObject({
+        'new-connection-mark': 'NCM',
+        'new-packet-mark': 'NPM',
+        'new-routing-mark': 'main',
+      });
+    });
+
     it('sends place-before when requested and omits it otherwise', async () => {
       await withClient(async (client) => {
         await client.createMangleRule({
@@ -400,6 +459,33 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
       const set = harness.captured.find((entry) => entry.command.endsWith('/set'));
       expect(set?.command).toBe('/ip/firewall/mangle/set');
       expect(set?.attributes).toEqual({ 'new-connection-mark': 'otra', numbers: '*3' });
+    });
+
+    it('never sends a field the caller did not ask to change', async () => {
+      await withClient((client) => client.updateMangleRule({ id: '*3', kind: 'id' }, { protocol: 'udp' }));
+
+      const set = harness.captured.find((entry) => entry.command.endsWith('/set'));
+      expect(set?.attributes).toEqual({ numbers: '*3', protocol: 'udp' });
+      for (const untouched of [
+        'action', 'chain', 'comment', 'connection-mark', 'connection-state', 'disabled',
+        'dst-address', 'dst-port', 'in-interface', 'new-connection-mark', 'new-packet-mark',
+        'new-routing-mark', 'out-interface', 'packet-mark', 'passthrough', 'routing-mark',
+        'src-address', 'src-port',
+      ]) {
+        expect(set?.attributes, untouched).not.toHaveProperty(untouched);
+      }
+    });
+
+    /** Un `false` es una decision, no una ausencia: debe viajar como `no`, nunca omitirse. */
+    it('preserves both booleans, sending true as yes and false as no', async () => {
+      await withClient(async (client) => {
+        await client.updateMangleRule({ id: '*3', kind: 'id' }, { disabled: true, passthrough: true });
+        await client.updateMangleRule({ id: '*3', kind: 'id' }, { disabled: false, passthrough: false });
+      });
+
+      const sets = harness.captured.filter((entry) => entry.command.endsWith('/set'));
+      expect(sets[0]?.attributes).toEqual({ disabled: 'yes', numbers: '*3', passthrough: 'yes' });
+      expect(sets[1]?.attributes).toEqual({ disabled: 'no', numbers: '*3', passthrough: 'no' });
     });
 
     it('sends no /set at all when the update carries no fields', async () => {
@@ -467,6 +553,37 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
 
       expect(commandsOf()).toEqual(['/ip/firewall/mangle/print']);
     });
+
+    /**
+     * El destino no se valida contra el listado: se envia tal cual y decide el router. Es la
+     * unica lectura correcta, porque entre el listado y el `/move` la cadena puede cambiar.
+     */
+    it('sends an unknown destination verbatim instead of silently appending', async () => {
+      await withClient((client) => client.moveMangleRule({ id: '*3', kind: 'id' }, { placeBeforeId: '*404' }));
+
+      const move = harness.captured.find((entry) => entry.command.endsWith('/move'));
+      expect(move?.attributes).toEqual({ destination: '*404', numbers: '*3' });
+    });
+
+    it('surfaces the router rejection when the destination does not exist', async () => {
+      harness.trap = { forCommandEndingIn: '/move', message: 'no such item' };
+
+      await expect(
+        withClient((client) => client.moveMangleRule({ id: '*3', kind: 'id' }, { placeBeforeId: '*404' })),
+      ).rejects.toThrow('no such item');
+    });
+
+    it('resolves a managed-reference locator through a full listing before moving', async () => {
+      harness.existingRecords = [{ ...probeConnRule, '.id': '*9' }];
+
+      await withClient((client) =>
+        client.moveMangleRule({ kind: 'managed-reference', ruleReference: 'probe-conn' }, { placeBeforeId: '*1' }),
+      );
+
+      expect(commandsOf()).toEqual(['/ip/firewall/mangle/print', '/ip/firewall/mangle/move']);
+      expect(harness.captured[0]?.queries).toEqual([]);
+      expect(harness.captured[1]?.attributes).toEqual({ destination: '*1', numbers: '*9' });
+    });
   });
 
   describe('ENABLE, DISABLE and REMOVE', () => {
@@ -483,6 +600,25 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
 
       expect(commandsOf()).toEqual(['/ip/firewall/mangle/print', command]);
       expect(harness.captured[1]?.attributes).toEqual({ numbers: '*3' });
+    });
+
+    it.each(CASES)('%s resolves a managed-reference locator through a full listing', async (method, command) => {
+      harness.existingRecords = [{ ...probeConnRule, '.id': '*9' }];
+
+      await withClient((client) => client[method]({ kind: 'managed-reference', ruleReference: 'probe-conn' }));
+
+      expect(commandsOf()).toEqual(['/ip/firewall/mangle/print', command]);
+      // La resolucion por referencia lista todo y filtra localmente: sin `?comment=`.
+      expect(harness.captured[0]?.queries).toEqual([]);
+      expect(harness.captured[1]?.attributes).toEqual({ numbers: '*9' });
+    });
+
+    it.each(CASES)('%s does nothing when the managed reference matches no rule', async (method) => {
+      harness.existingRecords = [{ ...probeConnRule, comment: 'cuzonet:firewall-mangle:otra' }];
+
+      await withClient((client) => client[method]({ kind: 'managed-reference', ruleReference: 'probe-conn' }));
+
+      expect(commandsOf()).toEqual(['/ip/firewall/mangle/print']);
     });
 
     it.each(CASES)('%s does nothing when the rule does not exist', async (method) => {
@@ -551,18 +687,33 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
     const TRAPS = [
       ['not found', 'no such item'],
       ['duplicate', 'failure: already have such entry'],
+      ['generic failure', 'failure'],
       ['invalid parameter', 'unknown parameter foo'],
+      ['invalid action', 'input does not match any value of action'],
       ['invalid chain', 'failure: chain does not exist'],
       ['invalid protocol', 'input does not match any value of protocol'],
+      ['invalid interface', 'input does not match any value of in-interface'],
+      ['invalid mark', 'invalid value for argument new-packet-mark'],
       // Capturado literalmente del router durante la Fase 0 al enviar un valor
       // inexistente: `new-routing-mark` se valida contra las tablas de enrutamiento.
       ['unknown routing mark', 'input does not match any value of new-routing-mark'],
     ] as const;
 
-    it.each(TRAPS)('surfaces a "%s" trap verbatim from /add', async (_label, message) => {
+    /**
+     * Solo el trap de `new-routing-mark` esta capturado del router; el resto reproduce la
+     * FORMA de los mensajes que RouterOS emite para cada familia de error. Lo certificado
+     * aqui es la propagacion verbatim, no la redaccion exacta de cada mensaje: el mapeo a
+     * errores de dominio corresponde a la Fase 4 y debe leer el mensaje, no un codigo.
+     */
+    it.each(TRAPS)('surfaces a "%s" trap verbatim from /add, as RouterOSTrapError', async (_label, message) => {
       harness.trap = { forCommandEndingIn: '/add', message };
 
-      await expect(withClient(addRule)).rejects.toThrow(message);
+      const error = await withClient((client) =>
+        addRule(client).then(() => null).catch((caught: unknown) => caught),
+      );
+
+      expect((error as Error).name).toBe('RouterOSTrapError');
+      expect((error as Error).message).toBe(message);
     });
 
     it('exposes the trap as RouterOSTrapError, so callers can map it by message', async () => {
