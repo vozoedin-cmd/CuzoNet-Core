@@ -561,6 +561,130 @@ export interface RouterOsMangleRuleMoveTarget {
   readonly placeBeforeId?: string;
 }
 
+/**
+ * Clasificación del comentario de una regla Raw respecto a la propiedad de CuzoNet. Son
+ * exactamente los cuatro que `RawRuleComment.parseOwnership` puede devolver; no hay
+ * `legacy` porque Raw nace con un único formato de marcador.
+ */
+export type RouterOsRawRuleOwnershipStatus = 'valid' | 'malformed' | 'foreign' | 'unmanaged';
+
+export interface RouterOsRawRuleOwnership {
+  readonly status: RouterOsRawRuleOwnershipStatus;
+  /** Solo presente cuando `status` es `valid`; es lo que hace resoluble a la regla. */
+  readonly ruleReference?: string;
+  readonly userComment?: string;
+}
+
+/**
+ * Una regla de `/ip/firewall/raw` tal como se OBSERVA en el router.
+ *
+ * Todo campo de este modelo se creó y releyó contra un hEX con RouterOS 7.21.4 durante la
+ * sonda de la Fase 0-bis. Nada se infirió por analogía con Filter, y esa disciplina importa
+ * aquí más que en ningún otro recurso: Raw se ejecuta ANTES del connection tracking, así que
+ * los matchers de conntrack no existen. El router los rechaza uno por uno con
+ * `unknown parameter <campo>`:
+ *
+ *   connection-state, connection-mark, routing-mark, passthrough, new-packet-mark
+ *
+ * `packet-mark` SÍ existe como matcher, y esa asimetría —marca de paquete sí, de conexión
+ * no— no es deducible: solo observable.
+ *
+ * `dynamic`, `invalid`, `bytes`, `packets` y `physicalIndex` son de SOLO LECTURA. Los cuatro
+ * primeros llegaron materializados en el 100% de las reglas de sonda.
+ *
+ * `physicalIndex` solo está presente cuando la regla proviene de un listado completo; una
+ * búsqueda por `.id` devuelve una fila suelta y omite el campo en lugar de inventarlo.
+ *
+ * A diferencia de Mangle, Raw NO tiene ningún booleano opcional siempre materializado: `log`
+ * desaparece de la respuesta cuando es falso, incluso pidiéndolo por `.proplist`. Por eso
+ * este recurso no necesita tabla de defaults en el estado deseado.
+ */
+export interface ObservedRawRule {
+  readonly id: string;
+  readonly physicalIndex?: number;
+  readonly dynamic: boolean;
+  readonly invalid: boolean;
+  readonly chain: string;
+  readonly action: string;
+  readonly comment?: string;
+  readonly ownership: RouterOsRawRuleOwnership;
+  readonly disabled: boolean;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly srcAddressList?: string;
+  readonly dstAddressList?: string;
+  readonly tcpFlags?: string;
+  readonly packetMark?: string;
+  readonly log?: boolean;
+  readonly logPrefix?: string;
+  readonly jumpTarget?: string;
+  readonly addressList?: string;
+  readonly addressListTimeout?: string;
+  readonly bytes: number;
+  readonly packets: number;
+}
+
+/**
+ * Campos de una regla Raw que CuzoNet administra: los que puede ESCRIBIR y comparar.
+ *
+ * Deliberadamente separado de `ObservedRawRule`: los de solo lectura (`dynamic`, `invalid`,
+ * `bytes`, `packets`, `physicalIndex`), la identidad (`id`) y la propiedad (`ownership`) no
+ * aparecen aquí, de modo que el sistema de tipos impida construir una escritura que
+ * pretenda fijarlos.
+ */
+export interface ManagedRawRuleSpec {
+  readonly chain: string;
+  readonly action: string;
+  readonly comment: string;
+  readonly disabled?: boolean;
+  readonly protocol?: string;
+  readonly srcAddress?: string;
+  readonly dstAddress?: string;
+  readonly srcPort?: string;
+  readonly dstPort?: string;
+  readonly inInterface?: string;
+  readonly outInterface?: string;
+  readonly srcAddressList?: string;
+  readonly dstAddressList?: string;
+  readonly tcpFlags?: string;
+  readonly packetMark?: string;
+  readonly log?: boolean;
+  readonly logPrefix?: string;
+  readonly jumpTarget?: string;
+  readonly addressList?: string;
+  readonly addressListTimeout?: string;
+}
+
+export interface RouterOsRawRuleIdLocator {
+  readonly kind: 'id';
+  readonly id: string;
+}
+
+export interface RouterOsRawRuleReferenceLocator {
+  readonly kind: 'managed-reference';
+  readonly ruleReference: string;
+}
+
+/** Unión discriminada: nunca una bolsa de opcionales donde ambos pudieran faltar o coexistir. */
+export type RouterOsRawRuleLocator = RouterOsRawRuleIdLocator | RouterOsRawRuleReferenceLocator;
+
+export interface RouterOsRawRuleCreateData extends ManagedRawRuleSpec {
+  /** .id of the existing rule this one should be inserted before; omit to append at the end. */
+  readonly placeBeforeId?: string;
+}
+
+export type RouterOsRawRuleUpdateData = Partial<ManagedRawRuleSpec>;
+
+export interface RouterOsRawRuleMoveTarget {
+  /** .id of the rule the moved rule should be inserted before; omit to move to the end. */
+  readonly placeBeforeId?: string;
+}
+
 export interface RouterOsClientPort {
   close(): Promise<void>;
 
