@@ -75,6 +75,32 @@ function parseRouterOsBoolean(value: string | undefined): boolean {
   return value === 'yes' || value === 'true';
 }
 
+/**
+ * Atributos de `/move` para las tres tablas de reglas ordenadas (Filter, NAT, Mangle).
+ *
+ * `destination` significa "colocar ANTES del elemento que ocupa esa posición", así que
+ * ningún índice puede expresar "al final": con N reglas los índices válidos son 0..N-1 y
+ * el último de ellos deja la regla en la penúltima posición. La forma de mover al final es
+ * OMITIR `destination`.
+ *
+ * Antes se enviaba `destination=String(rules.length)`, es decir N, siempre fuera de rango.
+ * Verificado contra RouterOS 7.21.4 sobre `/ip/firewall/mangle` con tres reglas:
+ *
+ *   destination=3            -> trap "no such item"
+ *   destination=2 (la última)-> trap "failure: can not move object before itself"
+ *   destination=2 (la primera)-> queda en el índice 1, NO al final
+ *   sin destination          -> queda al final, e idempotente si ya lo estaba
+ *
+ * El defecto era invisible porque el arnés de wire protocol es un servidor falso que acepta
+ * cualquier destino y ningún E2E ejercitaba `move`. Omitir el atributo elimina además el
+ * listado extra que solo servía para contar.
+ */
+function moveAttributes(ruleId: string, placeBeforeId: string | undefined): Record<string, string> {
+  return placeBeforeId === undefined
+    ? { numbers: ruleId }
+    : { destination: placeBeforeId, numbers: ruleId };
+}
+
 export class LibraryRouterOsClient implements RouterOsClientPort {
   public constructor(
     private readonly client: BaseRouterOsClient,
@@ -694,14 +720,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     const rule = await this.resolveFilterRule(locator);
     if (!rule) return;
 
-    let destination = target.placeBeforeId;
-    if (destination === undefined) {
-      const rules = await this.listFilterRules();
-      destination = String(rules.length);
-    }
-
     await this.client.execute('/ip/firewall/filter/move', {
-      attributes: { destination, numbers: rule.id },
+      attributes: moveAttributes(rule.id, target.placeBeforeId),
       timeoutMs: this.timeoutMs,
     });
   }
@@ -833,14 +853,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     const rule = await this.resolveNatRule(locator);
     if (!rule) return;
 
-    let destination = target.placeBeforeId;
-    if (destination === undefined) {
-      const rules = await this.listNatRules();
-      destination = String(rules.length);
-    }
-
     await this.client.execute('/ip/firewall/nat/move', {
-      attributes: { destination, numbers: rule.id },
+      attributes: moveAttributes(rule.id, target.placeBeforeId),
       timeoutMs: this.timeoutMs,
     });
   }
@@ -976,14 +990,8 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     const rule = await this.resolveMangleRule(locator);
     if (!rule) return;
 
-    let destination = target.placeBeforeId;
-    if (destination === undefined) {
-      const rules = await this.listMangleRules();
-      destination = String(rules.length);
-    }
-
     await this.client.execute('/ip/firewall/mangle/move', {
-      attributes: { destination, numbers: rule.id },
+      attributes: moveAttributes(rule.id, target.placeBeforeId),
       timeoutMs: this.timeoutMs,
     });
   }

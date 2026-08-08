@@ -377,8 +377,12 @@ describe('LibraryRouterOsClient wire protocol (Firewall NAT)', () => {
       expect(move?.attributes).toEqual({ destination: '*1', numbers: '*3' });
     });
 
-    it('moves to the end by counting the rules and using that count as destination', async () => {
-      // El arnes no filtra por query, asi que la fila a resolver va primero.
+    /**
+     * REGRESION. `destination` significa "antes del elemento en esa posicion", asi que
+     * ningun indice expresa "al final". Antes se enviaba `destination=<numero de reglas>`,
+     * siempre fuera de rango: verificado contra RouterOS 7.21.4, devuelve `no such item`.
+     */
+    it('moves to the end by omitting destination entirely', async () => {
       harness.existingRecords = [
         { ...managedRule, '.id': '*3' },
         { ...managedRule, '.id': '*1' },
@@ -387,12 +391,9 @@ describe('LibraryRouterOsClient wire protocol (Firewall NAT)', () => {
 
       await withClient((client) => client.moveNatRule({ id: '*3', kind: 'id' }, {}));
 
-      expect(commandsOf()).toEqual([
-        '/ip/firewall/nat/print',
-        '/ip/firewall/nat/print',
-        '/ip/firewall/nat/move',
-      ]);
-      expect(harness.captured[2]?.attributes).toEqual({ destination: '3', numbers: '*3' });
+      expect(commandsOf()).toEqual(['/ip/firewall/nat/print', '/ip/firewall/nat/move']);
+      expect(harness.captured[1]?.attributes).toEqual({ numbers: '*3' });
+      expect(harness.captured[1]?.attributes).not.toHaveProperty('destination');
     });
 
     it('does nothing when the rule to move does not exist', async () => {

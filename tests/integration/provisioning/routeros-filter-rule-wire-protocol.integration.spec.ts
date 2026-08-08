@@ -491,9 +491,13 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
       expect(move?.attributes).toEqual({ destination: '*1', numbers: '*3' });
     });
 
-    it('moves to the end by counting the rules and using that count as destination', async () => {
-      // El arnes no filtra por query, asi que la fila a resolver va primero para que la
-      // resolucion por ?.id= sea inequivoca; el conteo sigue siendo 3.
+    /**
+     * REGRESION. `destination` significa "antes del elemento en esa posicion", asi que
+     * ningun indice expresa "al final". Antes se enviaba `destination=<numero de reglas>`,
+     * siempre fuera de rango: verificado contra RouterOS 7.21.4, devuelve `no such item`.
+     * La forma correcta es omitir el atributo.
+     */
+    it('moves to the end by omitting destination entirely', async () => {
       harness.existingRecords = [
         { ...managedRule, '.id': '*3' },
         { ...managedRule, '.id': '*1' },
@@ -502,14 +506,27 @@ describe('LibraryRouterOsClient wire protocol (Firewall Filter)', () => {
 
       await withClient((client) => client.moveFilterRule({ id: '*3', kind: 'id' }, {}));
 
-      // Resolucion + listado completo para contar + move: tres viajes.
-      expect(commandsOf()).toEqual([
-        '/ip/firewall/filter/print',
-        '/ip/firewall/filter/print',
-        '/ip/firewall/filter/move',
-      ]);
-      const move = harness.captured[2];
-      expect(move?.attributes).toEqual({ destination: '3', numbers: '*3' });
+      // Resolucion + move: el listado que solo servia para contar desaparece.
+      expect(commandsOf()).toEqual(['/ip/firewall/filter/print', '/ip/firewall/filter/move']);
+      const move = harness.captured[1];
+      expect(move?.attributes).toEqual({ numbers: '*3' });
+      expect(move?.attributes).not.toHaveProperty('destination');
+    });
+
+    it('never sends a numeric destination, which the router rejects as out of range', async () => {
+      harness.existingRecords = [
+        { ...managedRule, '.id': '*3' },
+        { ...managedRule, '.id': '*1' },
+      ];
+
+      await withClient(async (client) => {
+        await client.moveFilterRule({ id: '*3', kind: 'id' }, {});
+        await client.moveFilterRule({ id: '*3', kind: 'id' }, { placeBeforeId: '*1' });
+      });
+
+      for (const move of harness.captured.filter((e) => e.command.endsWith('/move'))) {
+        expect(move.attributes.destination ?? '*1').toMatch(/^\*/);
+      }
     });
 
     it('does nothing when the rule to move does not exist', async () => {

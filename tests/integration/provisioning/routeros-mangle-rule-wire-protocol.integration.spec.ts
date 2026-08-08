@@ -529,7 +529,17 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
       expect(move?.attributes).toEqual({ destination: '*1', numbers: '*3' });
     });
 
-    it('moves to the end by counting the rules and using that count as destination', async () => {
+    /**
+     * REGRESION, verificada contra el router real. `destination` coloca ANTES del elemento
+     * en esa posicion, asi que ningun indice expresa "al final". Con tres reglas en
+     * `/ip/firewall/mangle` de un hEX con 7.21.4:
+     *
+     *   destination=3             -> "no such item"
+     *   destination=2 sobre la ultima -> "failure: can not move object before itself"
+     *   destination=2 sobre la primera -> queda en el indice 1, NO al final
+     *   sin destination           -> queda al final, e idempotente si ya lo estaba
+     */
+    it('moves to the end by omitting destination entirely', async () => {
       harness.existingRecords = [
         { ...probeConnRule, '.id': '*3' },
         { ...probeConnRule, '.id': '*1' },
@@ -538,12 +548,24 @@ describe('LibraryRouterOsClient wire protocol (Firewall Mangle)', () => {
 
       await withClient((client) => client.moveMangleRule({ id: '*3', kind: 'id' }, {}));
 
-      expect(commandsOf()).toEqual([
-        '/ip/firewall/mangle/print',
-        '/ip/firewall/mangle/print',
-        '/ip/firewall/mangle/move',
-      ]);
-      expect(harness.captured[2]?.attributes).toEqual({ destination: '3', numbers: '*3' });
+      expect(commandsOf()).toEqual(['/ip/firewall/mangle/print', '/ip/firewall/mangle/move']);
+      expect(harness.captured[1]?.attributes).toEqual({ numbers: '*3' });
+      expect(harness.captured[1]?.attributes).not.toHaveProperty('destination');
+    });
+
+    it('sends a numeric destination for no move at all: only .id targets are ever sent', async () => {
+      harness.existingRecords = [{ ...probeConnRule, '.id': '*3' }, { ...probeConnRule, '.id': '*1' }];
+
+      await withClient(async (client) => {
+        await client.moveMangleRule({ id: '*3', kind: 'id' }, {});
+        await client.moveMangleRule({ id: '*3', kind: 'id' }, { placeBeforeId: '*1' });
+      });
+
+      for (const move of harness.captured.filter((e) => e.command.endsWith('/move'))) {
+        if (move.attributes.destination !== undefined) {
+          expect(move.attributes.destination).toMatch(/^\*/);
+        }
+      }
     });
 
     it('does nothing when the rule to move does not exist', async () => {
