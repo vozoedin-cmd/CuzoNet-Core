@@ -4,7 +4,7 @@ import type { ProvisioningRequestRepository } from '../../application/ports/prov
 import type { NormalizedResourceRecord } from '../../domain/synchronization/normalized-resource-record.js';
 import type { SyncResourceType } from '../../domain/synchronization/sync-resource-type.js';
 import { extractRouterId, splitActionType } from '../../application/use-cases/provisioning/shared/provisioning-event-parsing.util.js';
-import { withDesiredFieldDefaults } from './desired-field-defaults.js';
+import { normalizeDesiredFields } from './desired-state-normalization.js';
 import { RULE_FIELD_NAMES } from './rule-field-names.js';
 
 interface MutableDesiredRecord {
@@ -118,7 +118,7 @@ function extractRuleReference(payload: Record<string, unknown>): string | undefi
   return typeof payload.ruleReference === 'string' ? payload.ruleReference : undefined;
 }
 
-/** add/update/enable/disable/remove behave identically across Filter, NAT and Mangle; only the field list differs. "move" never affects desired configuration fields — position/order is out of scope for Phase 1 comparison. */
+/** add/update/enable/disable/remove behave identically across Filter, NAT, Mangle and Raw; only the field list differs. "move" never affects desired configuration fields — position/order is out of scope for Phase 1 comparison. */
 function applyRuleLikeAction(
   current: MutableDesiredRecord | null,
   operation: string,
@@ -148,7 +148,10 @@ function applyRuleLikeAction(
   }
 }
 
-function createRuleLikeConfig(actionPrefix: string, resourceType: 'filter-rule' | 'nat-rule' | 'mangle-rule'): ResourceHistoryConfig {
+function createRuleLikeConfig(
+  actionPrefix: string,
+  resourceType: 'filter-rule' | 'nat-rule' | 'mangle-rule' | 'raw-rule',
+): ResourceHistoryConfig {
   const fieldNames = RULE_FIELD_NAMES[resourceType];
   return {
     actionTypes: ['add', 'update', 'move', 'enable', 'disable', 'remove'].map((operation) => `${actionPrefix}.${operation}`),
@@ -172,6 +175,7 @@ const RESOURCE_HISTORY_CONFIG: Record<SyncResourceType, ResourceHistoryConfig> =
   'filter-rule': createRuleLikeConfig('routeros.firewall.filter', 'filter-rule'),
   'mangle-rule': createRuleLikeConfig('routeros.firewall.mangle', 'mangle-rule'),
   'nat-rule': createRuleLikeConfig('routeros.firewall.nat', 'nat-rule'),
+  'raw-rule': createRuleLikeConfig('routeros.firewall.raw', 'raw-rule'),
   'simple-queue': {
     actionTypes: [
       'routeros.simple_queue.create',
@@ -232,7 +236,7 @@ export class ProvisioningHistoryDesiredStateRepository implements DesiredStateRe
       // valor declarado explícitamente en cualquier punto del historial sigue ganando.
       records.push({
         disabled: record.disabled,
-        fields: withDesiredFieldDefaults(resourceType, record.fields),
+        fields: normalizeDesiredFields(resourceType, record.fields),
         reference,
       });
     }

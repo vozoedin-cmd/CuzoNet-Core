@@ -21,6 +21,7 @@ import { automationExecutionEngineMigration } from '../migrations/0020-automatio
 import { provisioningEngineMigration } from '../migrations/0021-provisioning-engine.js';
 import { provisioningEventDispatcherMigration } from '../migrations/0022-provisioning-event-dispatcher.js';
 import { desiredResourceStatesMigration } from '../migrations/0023-desired-resource-states.js';
+import { rawRuleDesiredStateMigration } from '../migrations/0024-raw-rule-desired-state.js';
 import type { Migration } from './migration.js';
 
 export const migrations: readonly Migration[] = Object.freeze([
@@ -47,4 +48,5 @@ export const migrations: readonly Migration[] = Object.freeze([
   provisioningEngineMigration,
   provisioningEventDispatcherMigration,
   desiredResourceStatesMigration,
+  rawRuleDesiredStateMigration,
 ]);

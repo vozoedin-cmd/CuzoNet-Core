@@ -34,7 +34,12 @@ function buildFakePorts(
 }
 
 describe('GenerateReconciliationPlan', () => {
-  it('compares all five resource types by default', async () => {
+  /**
+   * Un plan sin `resourceTypes` recorre SYNC_RESOURCE_TYPES entero, asi que ampliar esa lista
+   * cambia el comportamiento de TODA llamada existente sin filtro. Se fija por extension para
+   * que anadir un recurso sea siempre una decision visible en el diff.
+   */
+  it('compares every declared resource type by default, raw-rule included', async () => {
     const { actualStateReader, desiredStateRepository, readCalls } = buildFakePorts({}, {});
     const useCase = new GenerateReconciliationPlan(
       desiredStateRepository,
@@ -46,7 +51,7 @@ describe('GenerateReconciliationPlan', () => {
     const plan = await useCase.execute({ routerId: 'router-1' });
 
     expect(readCalls.sort()).to.deep.equal(
-      ['address-list-entry', 'filter-rule', 'mangle-rule', 'nat-rule', 'simple-queue'].sort(),
+      ['address-list-entry', 'filter-rule', 'mangle-rule', 'nat-rule', 'raw-rule', 'simple-queue'].sort(),
     );
     expect(plan.mode).to.equal('dry-run');
     expect(plan.routerId).to.equal('router-1');

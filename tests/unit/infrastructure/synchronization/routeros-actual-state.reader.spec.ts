@@ -248,6 +248,125 @@ describe('RouterOsActualStateReader', () => {
     expect(record?.reference).to.match(/^unmanaged:/);
   });
 
+  describe('Raw rules', () => {
+    it('projects exactly the comparable Raw fields, and no read-only or identity ones', async () => {
+      await fakeClient.createRawRule({
+        action: 'add-src-to-address-list',
+        addressList: 'escaneos',
+        addressListTimeout: '1h',
+        chain: 'prerouting',
+        comment: 'cuzonet:firewall-raw:full comentario del operador',
+        dstAddress: '10.0.0.0/8',
+        dstAddressList: 'destinos',
+        dstPort: '443',
+        inInterface: 'ether1',
+        jumpTarget: 'mi-chain',
+        log: true,
+        logPrefix: 'RAW',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        protocol: 'tcp',
+        srcAddress: '192.168.1.0/24',
+        srcAddressList: 'origenes',
+        srcPort: '1024-65535',
+        tcpFlags: 'syn',
+      });
+
+      const [record] = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(record?.fields).to.deep.equal({
+        action: 'add-src-to-address-list',
+        addressList: 'escaneos',
+        addressListTimeout: '1h',
+        chain: 'prerouting',
+        dstAddress: '10.0.0.0/8',
+        dstAddressList: 'destinos',
+        dstPort: '443',
+        inInterface: 'ether1',
+        jumpTarget: 'mi-chain',
+        log: 'true',
+        logPrefix: 'RAW',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        protocol: 'tcp',
+        srcAddress: '192.168.1.0/24',
+        srcAddressList: 'origenes',
+        srcPort: '1024-65535',
+        tcpFlags: 'syn',
+      });
+      // `disabled` se compara, pero como campo propio del record, no dentro de `fields`.
+      expect(record?.disabled).to.equal(false);
+      expect(record?.reference).to.equal('full');
+    });
+
+    /** El router omite `log` cuando no esta activo: la forma canonica es "ausente". */
+    it('omits log when the rule does not carry it', async () => {
+      await fakeClient.createRawRule({
+        action: 'drop', chain: 'prerouting', comment: 'cuzonet:firewall-raw:sin-log',
+      });
+
+      const [record] = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(record?.fields).to.not.have.property('log');
+    });
+
+    it('canonicalises an explicit log=false down to absence', async () => {
+      await fakeClient.createRawRule({
+        action: 'drop', chain: 'prerouting', comment: 'cuzonet:firewall-raw:log-falso', log: false,
+      });
+
+      const [record] = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(record?.fields).to.not.have.property('log');
+    });
+
+    it('excludes dynamic Raw rules from the actual state', async () => {
+      await fakeClient.createRawRule({
+        action: 'drop', chain: 'prerouting', comment: 'cuzonet:firewall-raw:estatica',
+      });
+      await fakeClient.createRawRule({
+        action: 'accept', chain: 'prerouting', comment: 'generada por el router',
+      });
+      fakeClient.rawRules[1] = { ...fakeClient.rawRules[1]!, dynamic: true };
+
+      const records = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(records).to.have.length(1);
+      expect(records[0]?.reference).to.equal('estatica');
+    });
+
+    it('returns nothing when every Raw rule on the router is dynamic', async () => {
+      await fakeClient.createRawRule({ action: 'drop', chain: 'prerouting', comment: 'x' });
+      fakeClient.rawRules = fakeClient.rawRules.map((rule) => ({ ...rule, dynamic: true }));
+
+      expect(await reader.readActualState('company-1', 'router-1', 'raw-rule')).to.deep.equal([]);
+    });
+
+    it.each([
+      ['unmanaged', 'puesta a mano por el operador'],
+      ['foreign', 'cuzonet:firewall-mangle:otra-cosa'],
+      ['malformed', 'cuzonet:firewall-raw:'],
+    ])('gives a %s Raw rule a synthetic reference instead of a managed one', async (_status, comment) => {
+      await fakeClient.createRawRule({ action: 'accept', chain: 'prerouting', comment });
+
+      const [record] = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(record?.reference).to.match(/^unmanaged:/);
+    });
+
+    it('reports the physical order of the listing', async () => {
+      for (const reference of ['a', 'b', 'c']) {
+        await fakeClient.createRawRule({
+          action: 'accept', chain: 'prerouting', comment: `cuzonet:firewall-raw:${reference}`,
+        });
+      }
+
+      const records = await reader.readActualState('company-1', 'router-1', 'raw-rule');
+
+      expect(records.map((r) => r.reference)).to.deep.equal(['a', 'b', 'c']);
+    });
+  });
+
   it('closes the client after reading, even across resource types', async () => {
     await reader.readActualState('company-1', 'router-1', 'simple-queue');
     expect(fakeClient.closed).to.equal(true);

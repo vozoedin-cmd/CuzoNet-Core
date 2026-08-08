@@ -23,7 +23,7 @@
  *   no se reporta. En address-list sí se compara, porque allí la identidad
  *   es la clave natural `list:address` y el comentario es solo del usuario.
  */
-export const RULE_FIELD_NAMES: Record<'filter-rule' | 'nat-rule' | 'mangle-rule', readonly string[]> = {
+export const RULE_FIELD_NAMES: Record<'filter-rule' | 'nat-rule' | 'mangle-rule' | 'raw-rule', readonly string[]> = {
   'filter-rule': [
     'chain',
     'action',
@@ -37,7 +37,7 @@ export const RULE_FIELD_NAMES: Record<'filter-rule' | 'nat-rule' | 'mangle-rule'
     'connectionState',
   ],
   // `passthrough` es el único campo con default materializado por el router; el estado
-  // deseado lo completa en `desired-field-defaults.ts` antes de comparar.
+  // deseado lo completa en `desired-state-normalization.ts` antes de comparar.
   'mangle-rule': [
     'chain',
     'action',
@@ -56,6 +56,35 @@ export const RULE_FIELD_NAMES: Record<'filter-rule' | 'nat-rule' | 'mangle-rule'
     'newPacketMark',
     'newRoutingMark',
     'passthrough',
+  ],
+  /**
+   * Raw se ejecuta ANTES del connection tracking, asi que no lleva `connectionState` ni
+   * marcas de conexion: la sonda de la Fase 0-bis vio al router rechazarlas con
+   * `unknown parameter`. `packetMark` SI entra, porque ahi si existe como matcher.
+   *
+   * `log` es booleano y el router lo OMITE cuando es falso, asi que "false" y "ausente" son
+   * el mismo estado. La equivalencia se resuelve canonizando ambos lados en
+   * `desired-state-normalization.ts`, no con un default inventado.
+   */
+  'raw-rule': [
+    'chain',
+    'action',
+    'protocol',
+    'srcAddress',
+    'dstAddress',
+    'srcPort',
+    'dstPort',
+    'inInterface',
+    'outInterface',
+    'srcAddressList',
+    'dstAddressList',
+    'tcpFlags',
+    'packetMark',
+    'log',
+    'logPrefix',
+    'jumpTarget',
+    'addressList',
+    'addressListTimeout',
   ],
   'nat-rule': [
     'chain',

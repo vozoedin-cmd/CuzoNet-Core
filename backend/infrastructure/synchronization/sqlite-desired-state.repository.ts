@@ -2,7 +2,7 @@ import type { DesiredStateRepository } from '../../application/ports/synchroniza
 import type { DesiredResourceStateRepository } from '../../application/ports/synchronization/desired-resource-state-repository.port.js';
 import type { NormalizedResourceRecord } from '../../domain/synchronization/normalized-resource-record.js';
 import type { SyncResourceType } from '../../domain/synchronization/sync-resource-type.js';
-import { withDesiredFieldDefaults } from './desired-field-defaults.js';
+import { normalizeDesiredFields } from './desired-state-normalization.js';
 
 /**
  * The definitive DesiredStateRepository implementation (Hito 21.5): reads
@@ -27,7 +27,7 @@ export class SqliteDesiredStateRepository implements DesiredStateRepository {
     // `desiredPosition` no se proyecta — ver el GAP de orden en ReconciliationItem.
     return states.map((state) => ({
       disabled: state.disabled,
-      fields: withDesiredFieldDefaults(resourceType, state.desiredFields),
+      fields: normalizeDesiredFields(resourceType, state.desiredFields),
       reference: state.reference,
     }));
   }

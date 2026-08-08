@@ -7,11 +7,13 @@ import type {
   ObservedFilterRule,
   ObservedMangleRule,
   ObservedNatRule,
+  ObservedRawRule,
   RouterOsSimpleQueue,
 } from '../../application/ports/provisioning/routeros/routeros-client.port.js';
 import type { SecretProviderPort } from '../../application/ports/provisioning/routeros/secret-provider.port.js';
 import type { NormalizedResourceRecord } from '../../domain/synchronization/normalized-resource-record.js';
 import type { SyncResourceType } from '../../domain/synchronization/sync-resource-type.js';
+import { normalizeActualFields } from './desired-state-normalization.js';
 import { RouterConnectionError } from './errors/router-connection.error.js';
 import { RULE_FIELD_NAMES } from './rule-field-names.js';
 
@@ -119,6 +121,26 @@ function normalizeMangleRule(rule: ObservedMangleRule): NormalizedResourceRecord
   };
 }
 
+/**
+ * Mismo criterio que en Mangle y en las entradas de address-list: una regla Raw
+ * `dynamic=true` la gobierna RouterOS, no persiste y desaparece sola, asi que CuzoNet no
+ * puede haberla deseado. Incluirla la mostraria como `unexpected`, inventando una
+ * divergencia, y contradiria al aprovisionamiento, que ya se niega a tocarla.
+ */
+function isManageableRawRule(rule: ObservedRawRule): boolean {
+  return !rule.dynamic;
+}
+
+function normalizeRawRule(rule: ObservedRawRule): NormalizedResourceRecord {
+  return {
+    disabled: rule.disabled,
+    // `log` se canoniza a la forma del router —presente significa true— para que un `false`
+    // explicito compare igual que la ausencia que se observa hoy.
+    fields: normalizeActualFields('raw-rule', pickRuleFields(rule, RULE_FIELD_NAMES['raw-rule'])),
+    reference: ruleReferenceOrSynthetic(rule),
+  };
+}
+
 export class RouterOsActualStateReader implements ActualStateReader {
   public constructor(
     private readonly connectionResolver: RouterConnectionResolverPort,
@@ -148,6 +170,8 @@ export class RouterOsActualStateReader implements ActualStateReader {
           return (await client.listMangleRules())
             .filter(isManageableMangleRule)
             .map(normalizeMangleRule);
+        case 'raw-rule':
+          return (await client.listRawRules()).filter(isManageableRawRule).map(normalizeRawRule);
       }
     } finally {
       await client.close().catch(() => {

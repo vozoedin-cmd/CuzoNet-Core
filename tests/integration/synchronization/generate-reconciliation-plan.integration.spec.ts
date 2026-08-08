@@ -11,6 +11,7 @@ import { InMemoryProvisioningRequestRepository } from '../../../backend/infrastr
 import { FakeRouterOsClient } from '../../../backend/infrastructure/provisioning/routeros/fake-routeros.client.js';
 import { ProvisioningHistoryDesiredStateRepository } from '../../../backend/infrastructure/synchronization/provisioning-history-desired-state.repository.js';
 import { RouterOsActualStateReader } from '../../../backend/infrastructure/synchronization/routeros-actual-state.reader.js';
+import { SYNC_RESOURCE_TYPES } from '../../../backend/domain/synchronization/sync-resource-type.js';
 
 const companyContext: CompanyContext = { getCompanyId: () => 'company-1' };
 const clock: Clock = { now: () => new Date('2026-07-21T12:00:00.000Z') };
@@ -469,6 +470,245 @@ describe('GenerateReconciliationPlan (full engine, in-memory + fake RouterOS)', 
       const plan = await useCase.execute({ resourceTypes: ['mangle-rule'], routerId: 'router-1' });
 
       expect(plan.items[0]?.status).to.equal('in_sync');
+    });
+  });
+
+  /**
+   * Raw de punta a punta: historial de aprovisionamiento -> estado deseado -> lectura del
+   * router -> plan. Su campo delicado es `log`, y la diferencia con `passthrough` de Mangle
+   * es exactamente la opuesta: el router OMITE `log` cuando no esta activo, asi que "false" y
+   * "ausente" son el mismo estado y se canonizan quitando el false, sin inventar defaults.
+   */
+  describe('Raw rules', () => {
+    const ADD = { action: 'drop', chain: 'prerouting', protocol: 'tcp', routerId: 'router-1' } as const;
+
+    async function desire(reference: string, extra: Record<string, unknown> = {}): Promise<void> {
+      await requestRepo.save(
+        completedRequest(
+          'routeros.firewall.raw.add',
+          { ...ADD, ruleReference: reference, ...extra },
+          new Date('2026-07-01T00:00:00.000Z'),
+        ),
+      );
+    }
+
+    async function onRouter(reference: string, extra: Record<string, unknown> = {}): Promise<void> {
+      await fakeClient.createRawRule({
+        action: 'drop',
+        chain: 'prerouting',
+        comment: `cuzonet:firewall-raw:${reference}`,
+        protocol: 'tcp',
+        ...extra,
+      });
+    }
+
+    const plan = () => useCase.execute({ resourceTypes: ['raw-rule'], routerId: 'router-1' });
+
+    /**
+     * Matriz de `log`. La sonda de la Fase 0-bis fijo la semantica: el router no devuelve el
+     * campo cuando no esta activo.
+     */
+    const LOG_MATRIX = [
+      ['desired omits log, router omits it', {}, {}, 'in_sync'],
+      ['desired log=false, router omits it', { log: false }, {}, 'in_sync'],
+      ['desired log=true, router has true', { log: true }, { log: true }, 'in_sync'],
+      ['desired log=true, router omits it', { log: true }, {}, 'drifted'],
+      ['desired log=false, router has true', { log: false }, { log: true }, 'drifted'],
+      ['desired omits log, router has true', {}, { log: true }, 'drifted'],
+    ] as const;
+
+    it.each(LOG_MATRIX)('%s -> %s', async (_label, desiredExtra, actualExtra, expected) => {
+      await desire('block-bogons', desiredExtra);
+      await onRouter('block-bogons', actualExtra);
+
+      const result = await plan();
+
+      expect(result.items).to.have.length(1);
+      expect(result.items[0]?.status).to.equal(expected);
+      if (expected === 'drifted') {
+        expect(result.items[0]?.differingFields).to.deep.equal(['log']);
+      }
+      expect(result.summary.isConverged).to.equal(expected === 'in_sync');
+    });
+
+    it('never reports a dynamic Raw rule, in any status', async () => {
+      await onRouter('generada-por-el-router');
+      fakeClient.rawRules = fakeClient.rawRules.map((rule) => ({ ...rule, dynamic: true }));
+
+      const result = await plan();
+
+      expect(result.items).to.deep.equal([]);
+      expect(result.summary.unexpected).to.equal(0);
+      expect(result.summary.isConverged).to.equal(true);
+    });
+
+    it.each([
+      ['unmanaged', 'regla escrita a mano por el operador'],
+      ['foreign', 'cuzonet:firewall-mangle:otra-cosa'],
+      ['malformed', 'cuzonet:firewall-raw:'],
+    ])('reports a %s rule without ever making it actionable', async (_status, comment) => {
+      await fakeClient.createRawRule({ action: 'drop', chain: 'prerouting', comment });
+
+      const result = await plan();
+
+      expect(result.items).to.have.length(1);
+      expect(result.items[0]?.status).to.equal('unexpected');
+      expect(result.items[0]?.reference).to.match(/^unmanaged:/);
+      expect(result.items[0]?.desiredFields).to.equal(undefined);
+      expect(result.summary).to.include({ drifted: 0, missing: 0, unexpected: 1 });
+      expect(result.mode).to.equal('dry-run');
+      expect(fakeClient.rawRules).to.have.length(1);
+    });
+
+    it('collapses two rules sharing a managed reference into one ambiguous item', async () => {
+      await desire('block-bogons');
+      await onRouter('block-bogons');
+      await onRouter('block-bogons', { protocol: 'udp' });
+
+      const result = await plan();
+
+      expect(result.items).to.have.length(1);
+      const item = result.items[0];
+      expect(item?.status).to.equal('ambiguous');
+      expect(item?.reference).to.equal('block-bogons');
+      expect(item?.actualMatchCount).to.equal(2);
+      expect(item?.actualCandidates).to.have.length(2);
+      expect(item?.actualCandidates?.map((c) => c.fields.protocol)).to.deep.equal(['tcp', 'udp']);
+      expect(item?.actualFields).to.equal(undefined);
+      expect(item?.differingFields).to.equal(undefined);
+      expect(result.summary).to.deep.equal({
+        ambiguous: 1,
+        drifted: 0,
+        inSync: 0,
+        isConverged: false,
+        missing: 0,
+        total: 1,
+        unexpected: 0,
+      });
+    });
+
+    it('classifies in_sync, missing, drifted, unexpected and ambiguous in a single run', async () => {
+      await desire('ok');
+      await onRouter('ok');
+
+      await desire('nunca-creada');
+
+      await desire('cambiada', { protocol: 'udp' });
+      await onRouter('cambiada', { protocol: 'tcp' });
+
+      await fakeClient.createRawRule({ action: 'accept', chain: 'prerouting', comment: 'del operador' });
+
+      await desire('duplicada');
+      await onRouter('duplicada');
+      await onRouter('duplicada');
+
+      const result = await plan();
+
+      const byReference = new Map(result.items.map((item) => [item.reference, item]));
+      expect(byReference.get('ok')?.status).to.equal('in_sync');
+      expect(byReference.get('nunca-creada')?.status).to.equal('missing');
+      expect(byReference.get('cambiada')?.status).to.equal('drifted');
+      expect(byReference.get('cambiada')?.differingFields).to.deep.equal(['protocol']);
+      expect(byReference.get('duplicada')?.status).to.equal('ambiguous');
+      expect(result.summary).to.deep.equal({
+        ambiguous: 1,
+        drifted: 1,
+        inSync: 1,
+        isConverged: false,
+        missing: 1,
+        total: 5,
+        unexpected: 1,
+      });
+    });
+
+    it('a remove recorded in the history leaves the leftover rule as unexpected', async () => {
+      await desire('temporal');
+      await requestRepo.save(
+        completedRequest(
+          'routeros.firewall.raw.remove',
+          { routerId: 'router-1', ruleReference: 'temporal' },
+          new Date('2026-07-02T00:00:00.000Z'),
+        ),
+      );
+      await onRouter('temporal');
+
+      const result = await plan();
+
+      expect(result.items).to.have.length(1);
+      expect(result.items[0]).to.include({ reference: 'temporal', status: 'unexpected' });
+    });
+
+    it('a disable recorded in the history drifts against a rule still enabled on the router', async () => {
+      await desire('block-bogons');
+      await requestRepo.save(
+        completedRequest(
+          'routeros.firewall.raw.disable',
+          { routerId: 'router-1', ruleReference: 'block-bogons' },
+          new Date('2026-07-02T00:00:00.000Z'),
+        ),
+      );
+      await onRouter('block-bogons');
+
+      const result = await plan();
+
+      expect(result.items[0]?.status).to.equal('drifted');
+      expect(result.items[0]?.differingFields).to.deep.equal(['disabled']);
+    });
+
+    it('an update recorded in the history converges once the router catches up', async () => {
+      await desire('block-bogons');
+      await requestRepo.save(
+        completedRequest(
+          'routeros.firewall.raw.update',
+          { protocol: 'udp', routerId: 'router-1', ruleReference: 'block-bogons' },
+          new Date('2026-07-02T00:00:00.000Z'),
+        ),
+      );
+      await onRouter('block-bogons', { protocol: 'udp' });
+
+      expect((await plan()).items[0]?.status).to.equal('in_sync');
+    });
+
+    it('does not drift when only the user comment differs', async () => {
+      await desire('block-bogons', { comment: 'lo que el operador escribio' });
+      await onRouter('block-bogons', { comment: 'cuzonet:firewall-raw:block-bogons otra cosa distinta' });
+
+      expect((await plan()).items[0]?.status).to.equal('in_sync');
+    });
+  });
+
+  /**
+   * CAMBIO DE COMPORTAMIENTO. Un plan sin `resourceTypes` recorre SYNC_RESOURCE_TYPES entero,
+   * asi que anadir `raw-rule` hace que toda llamada existente lea tambien /ip/firewall/raw.
+   * Se fija explicitamente para que ampliar la lista nunca sea un efecto colateral invisible.
+   */
+  describe('default plan scope', () => {
+    it('reads raw rules when the caller does not filter by resource type', async () => {
+      await fakeClient.createRawRule({
+        action: 'drop', chain: 'prerouting', comment: 'cuzonet:firewall-raw:sin-declarar',
+      });
+
+      const plan = await useCase.execute({ routerId: 'router-1' });
+
+      const raw = plan.items.filter((item) => item.resourceType === 'raw-rule');
+      expect(raw).to.have.length(1);
+      expect(raw[0]?.status).to.equal('unexpected');
+    });
+
+    it('covers every declared sync resource type, raw-rule included', async () => {
+      expect([...SYNC_RESOURCE_TYPES]).to.contain('raw-rule');
+
+      // Una regla por recurso de reglas, para que el plan por defecto las vea todas.
+      await fakeClient.createFilterRule({ action: 'accept', chain: 'input', comment: 'cuzonet:firewall-filter:f' });
+      await fakeClient.createNatRule({ action: 'masquerade', chain: 'srcnat', comment: 'cuzonet:firewall-nat:n' });
+      await fakeClient.createMangleRule({ action: 'passthrough', chain: 'forward', comment: 'cuzonet:firewall-mangle:m' });
+      await fakeClient.createRawRule({ action: 'drop', chain: 'prerouting', comment: 'cuzonet:firewall-raw:r' });
+
+      const plan = await useCase.execute({ routerId: 'router-1' });
+
+      expect(plan.items.map((item) => item.resourceType).sort()).to.deep.equal([
+        'filter-rule', 'mangle-rule', 'nat-rule', 'raw-rule',
+      ]);
     });
   });
 

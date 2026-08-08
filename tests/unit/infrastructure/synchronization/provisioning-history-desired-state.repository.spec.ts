@@ -487,6 +487,177 @@ describe('ProvisioningHistoryDesiredStateRepository', () => {
     });
   });
 
+  describe('Raw desired-state replay', () => {
+    async function save(operation: string, payload: Record<string, unknown>, at: string): Promise<void> {
+      await requestRepo.save(
+        completedRequest({
+          actionType: `routeros.firewall.raw.${operation}`,
+          completedAt: new Date(at),
+          payload: { routerId: 'router-1', ruleReference: 'block-bogons', ...payload },
+        }),
+      );
+    }
+
+    const ADD = { action: 'drop', chain: 'prerouting', protocol: 'tcp' };
+
+    it('derives exactly the comparable fields from a full add payload', async () => {
+      await save('add', {
+        ...ADD,
+        addressList: 'escaneos',
+        addressListTimeout: '1h',
+        comment: 'comentario del operador',
+        dstAddress: '10.0.0.0/8',
+        dstAddressList: 'destinos',
+        dstPort: '443',
+        inInterface: 'ether1',
+        jumpTarget: 'mi-chain',
+        log: true,
+        logPrefix: 'RAW',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        srcAddress: '192.168.1.0/24',
+        srcAddressList: 'origenes',
+        srcPort: '1024-65535',
+        tcpFlags: 'syn',
+      }, '2026-07-01T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      expect(desired?.fields).to.deep.equal({
+        action: 'drop',
+        addressList: 'escaneos',
+        addressListTimeout: '1h',
+        chain: 'prerouting',
+        dstAddress: '10.0.0.0/8',
+        dstAddressList: 'destinos',
+        dstPort: '443',
+        inInterface: 'ether1',
+        jumpTarget: 'mi-chain',
+        log: 'true',
+        logPrefix: 'RAW',
+        outInterface: 'ether2',
+        packetMark: 'PM',
+        protocol: 'tcp',
+        srcAddress: '192.168.1.0/24',
+        srcAddressList: 'origenes',
+        srcPort: '1024-65535',
+        tcpFlags: 'syn',
+      });
+      // El comentario tecnico y el de usuario quedan fuera del estado deseado de una regla.
+      expect(desired?.fields).to.not.have.property('comment');
+      expect(desired?.reference).to.equal('block-bogons');
+    });
+
+    /** Raw no recibe ningun default: nada aparece que el payload no declarara. */
+    it('adds no default whatsoever to a minimal add', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      expect(desired?.fields).to.deep.equal({ action: 'drop', chain: 'prerouting', protocol: 'tcp' });
+      expect(desired?.fields).to.not.have.property('log');
+      expect(desired?.fields).to.not.have.property('passthrough');
+    });
+
+    /** `log=false` es la forma no canonica de "sin log": se normaliza a la del router. */
+    it('drops a declared log=false, which the router expresses as absence', async () => {
+      await save('add', { ...ADD, log: false }, '2026-07-01T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      expect(desired?.fields).to.not.have.property('log');
+    });
+
+    it('keeps a declared log=true', async () => {
+      await save('add', { ...ADD, log: true }, '2026-07-01T00:00:00.000Z');
+
+      expect((await repository.getDesiredState('company-1', 'router-1', 'raw-rule'))[0]?.fields.log).to.equal('true');
+    });
+
+    it('an update patches only what it declares and preserves the rest', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      await save('update', { protocol: 'udp' }, '2026-07-02T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      expect(desired?.fields).to.include({ action: 'drop', chain: 'prerouting', protocol: 'udp' });
+    });
+
+    it('an update can turn logging on and back off', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      await save('update', { log: true }, '2026-07-02T00:00:00.000Z');
+      expect((await repository.getDesiredState('company-1', 'router-1', 'raw-rule'))[0]?.fields.log).to.equal('true');
+
+      await save('update', { log: false }, '2026-07-03T00:00:00.000Z');
+
+      expect((await repository.getDesiredState('company-1', 'router-1', 'raw-rule'))[0]?.fields)
+        .to.not.have.property('log');
+    });
+
+    it.each([
+      ['disable', true],
+      ['enable', false],
+    ] as const)('%s flips the disabled flag without touching the fields', async (operation, expected) => {
+      await save('add', { ...ADD, disabled: !expected }, '2026-07-01T00:00:00.000Z');
+      await save(operation, {}, '2026-07-02T00:00:00.000Z');
+
+      const [desired] = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      expect(desired?.disabled).to.equal(expected);
+      expect(desired?.fields).to.include({ protocol: 'tcp' });
+    });
+
+    it('a remove tombstones the reference: the rule is no longer desired', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      await save('remove', {}, '2026-07-02T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'raw-rule')).to.deep.equal([]);
+    });
+
+    it('an add after a remove desires the rule again', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      await save('remove', {}, '2026-07-02T00:00:00.000Z');
+      await save('add', ADD, '2026-07-03T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'raw-rule')).to.have.length(1);
+    });
+
+    /** El orden no es declarativo todavia: un `move` no puede cambiar nada comparable. */
+    it('a move leaves every comparable field untouched', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      const before = await repository.getDesiredState('company-1', 'router-1', 'raw-rule');
+
+      await save('move', { position: 0 }, '2026-07-02T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'raw-rule')).to.deep.equal(before);
+    });
+
+    it('an update before any add never resurrects a rule', async () => {
+      await save('update', { protocol: 'udp' }, '2026-07-01T00:00:00.000Z');
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'raw-rule')).to.deep.equal([]);
+    });
+
+    it('never mixes Raw history with the other rule resources', async () => {
+      await save('add', ADD, '2026-07-01T00:00:00.000Z');
+      await requestRepo.save(
+        completedRequest({
+          actionType: 'routeros.firewall.mangle.add',
+          completedAt: new Date('2026-07-01T00:00:00.000Z'),
+          payload: {
+            action: 'passthrough', chain: 'prerouting', routerId: 'router-1', ruleReference: 'block-bogons',
+          },
+        }),
+      );
+
+      expect(await repository.getDesiredState('company-1', 'router-1', 'raw-rule')).to.have.length(1);
+      expect((await repository.getDesiredState('company-1', 'router-1', 'raw-rule'))[0]?.fields.action)
+        .to.equal('drop');
+      expect((await repository.getDesiredState('company-1', 'router-1', 'mangle-rule'))[0]?.fields.action)
+        .to.equal('passthrough');
+    });
+  });
+
   it('only considers requests for the requested router', async () => {
     await requestRepo.save(
       completedRequest({
