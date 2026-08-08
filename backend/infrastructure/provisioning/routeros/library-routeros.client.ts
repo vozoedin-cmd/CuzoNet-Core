@@ -39,11 +39,18 @@ import type {
   RouterOsMangleRuleLocator,
   RouterOsMangleRuleMoveTarget,
   RouterOsMangleRuleUpdateData,
+  ManagedRawRuleSpec,
+  ObservedRawRule,
+  RouterOsRawRuleCreateData,
+  RouterOsRawRuleLocator,
+  RouterOsRawRuleMoveTarget,
+  RouterOsRawRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 import { ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
+import { RawRuleComment } from '../../../domain/provisioning/routeros/value-objects/raw-rule-comment.js';
 import { logger } from '../../logging/logger.js';
 
 /**
@@ -1006,6 +1013,112 @@ export class LibraryRouterOsClient implements RouterOsClientPort {
     });
   }
 
+  public async createRawRule(rule: RouterOsRawRuleCreateData): Promise<void> {
+    const attributes: Record<string, string> = {
+      action: rule.action,
+      chain: rule.chain,
+      comment: rule.comment,
+      ...rawRuleOptionalAttributes(rule),
+      ...(rule.placeBeforeId !== undefined ? { 'place-before': rule.placeBeforeId } : {}),
+    };
+
+    await this.client.execute('/ip/firewall/raw/add', {
+      attributes,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async disableRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    const rule = await this.resolveRawRule(locator);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/raw/disable', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async enableRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    const rule = await this.resolveRawRule(locator);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/raw/enable', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async findRawRuleById(id: string): Promise<ObservedRawRule | null> {
+    const replies = await this.client.print('/ip/firewall/raw', {
+      attributes: { '.proplist': RAW_RULE_PROPLIST },
+      queries: [`?.id=${id}`],
+      timeoutMs: this.timeoutMs,
+    });
+    const reply = replies[0];
+    // Sin `physicalIndex`: una consulta por `.id` devuelve una fila suelta y no puede
+    // determinar su posicion en la cadena.
+    return reply ? mapReplyToRawRule(reply) : null;
+  }
+
+  public async findRawRulesByReference(ruleReference: string): Promise<ObservedRawRule[]> {
+    const rules = await this.listRawRules();
+    return rules.filter((rule) => rule.ownership.ruleReference === ruleReference);
+  }
+
+  public async listRawRules(): Promise<ObservedRawRule[]> {
+    const replies = await this.client.print('/ip/firewall/raw', {
+      attributes: { '.proplist': RAW_RULE_PROPLIST },
+      timeoutMs: this.timeoutMs,
+    });
+    return replies.map((reply, i) => mapReplyToRawRule(reply, i));
+  }
+
+  private async resolveRawRule(locator: RouterOsRawRuleLocator): Promise<ObservedRawRule | null> {
+    if (locator.kind === 'id') {
+      return this.findRawRuleById(locator.id);
+    }
+    const matches = await this.findRawRulesByReference(locator.ruleReference);
+    return matches[0] ?? null;
+  }
+
+  public async moveRawRule(locator: RouterOsRawRuleLocator, target: RouterOsRawRuleMoveTarget): Promise<void> {
+    const rule = await this.resolveRawRule(locator);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/raw/move', {
+      attributes: moveAttributes(rule.id, target.placeBeforeId),
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async removeRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    const rule = await this.resolveRawRule(locator);
+    if (!rule) return;
+
+    await this.client.execute('/ip/firewall/raw/remove', {
+      attributes: { numbers: rule.id },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public async updateRawRule(locator: RouterOsRawRuleLocator, data: RouterOsRawRuleUpdateData): Promise<void> {
+    const rule = await this.resolveRawRule(locator);
+    if (!rule) return;
+
+    const patch = rawRuleOptionalAttributes(data);
+    if (data.chain !== undefined) patch.chain = data.chain;
+    if (data.action !== undefined) patch.action = data.action;
+    if (data.comment !== undefined) patch.comment = data.comment;
+
+    // Un `/set` sin campos no significa nada: no se emite comando alguno.
+    if (Object.keys(patch).length === 0) return;
+
+    await this.client.execute('/ip/firewall/raw/set', {
+      attributes: { numbers: rule.id, ...patch },
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
   public async updateMangleRule(
     locator: RouterOsMangleRuleLocator,
     data: RouterOsMangleRuleUpdateData,
@@ -1218,6 +1331,84 @@ function mapReplyToNatRule(reply: RouterOSRecord, index?: number): ObservedNatRu
     ...(reply['connection-state'] !== undefined ? { connectionState: reply['connection-state'] } : {}),
     ...(reply['to-addresses'] !== undefined ? { toAddresses: reply['to-addresses'] } : {}),
     ...(reply['to-ports'] !== undefined ? { toPorts: reply['to-ports'] } : {}),
+    bytes: reply.bytes ? parseInt(reply.bytes, 10) || 0 : 0,
+    packets: reply.packets ? parseInt(reply.packets, 10) || 0 : 0,
+  };
+}
+
+/**
+ * Campos de `/ip/firewall/raw` que alimentan `ObservedRawRule`. Exactamente los observados
+ * en la sonda de la Fase 0-bis contra RouterOS 7.21.4, y ninguno mas.
+ *
+ * No se piden `connection-state`, `connection-mark`, `routing-mark`, `passthrough` ni las
+ * marcas `new-*`: Raw se ejecuta antes del connection tracking y el router los rechaza con
+ * `unknown parameter <campo>`. `packet-mark` SI se pide, porque ahi si existe como matcher.
+ *
+ * Pedir un campo no garantiza recibirlo: la sonda comprobo que el router devuelve solo los
+ * que estan fijados, incluso cuando el `.proplist` los enumera. Los nueve siempre presentes
+ * son `.id`, `chain`, `action`, `disabled`, `dynamic`, `invalid`, `bytes`, `packets` y
+ * `comment` cuando la regla lo tiene.
+ */
+const RAW_RULE_PROPLIST =
+  '.id,chain,action,disabled,dynamic,invalid,bytes,packets,comment,protocol,src-address,dst-address,src-port,dst-port,in-interface,out-interface,src-address-list,dst-address-list,tcp-flags,packet-mark,log,log-prefix,jump-target,address-list,address-list-timeout';
+
+/**
+ * Atributos opcionales compartidos por `/add` y `/set`, con los nombres de RouterOS. Solo
+ * viaja lo que el llamador decidio: un campo ausente del spec no se envia, y un `false`
+ * explicito se envia como `no` en vez de omitirse.
+ */
+function rawRuleOptionalAttributes(data: Partial<ManagedRawRuleSpec>): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  if (data.protocol !== undefined) attributes.protocol = data.protocol;
+  if (data.srcAddress !== undefined) attributes['src-address'] = data.srcAddress;
+  if (data.dstAddress !== undefined) attributes['dst-address'] = data.dstAddress;
+  if (data.srcPort !== undefined) attributes['src-port'] = data.srcPort;
+  if (data.dstPort !== undefined) attributes['dst-port'] = data.dstPort;
+  if (data.inInterface !== undefined) attributes['in-interface'] = data.inInterface;
+  if (data.outInterface !== undefined) attributes['out-interface'] = data.outInterface;
+  if (data.srcAddressList !== undefined) attributes['src-address-list'] = data.srcAddressList;
+  if (data.dstAddressList !== undefined) attributes['dst-address-list'] = data.dstAddressList;
+  if (data.tcpFlags !== undefined) attributes['tcp-flags'] = data.tcpFlags;
+  if (data.packetMark !== undefined) attributes['packet-mark'] = data.packetMark;
+  if (data.log !== undefined) attributes.log = data.log ? 'yes' : 'no';
+  if (data.logPrefix !== undefined) attributes['log-prefix'] = data.logPrefix;
+  if (data.jumpTarget !== undefined) attributes['jump-target'] = data.jumpTarget;
+  if (data.addressList !== undefined) attributes['address-list'] = data.addressList;
+  if (data.addressListTimeout !== undefined) attributes['address-list-timeout'] = data.addressListTimeout;
+  if (data.disabled !== undefined) attributes.disabled = data.disabled ? 'yes' : 'no';
+  return attributes;
+}
+
+function mapReplyToRawRule(reply: RouterOSRecord, index?: number): ObservedRawRule {
+  const comment = reply.comment;
+  return {
+    id: reply['.id'] ?? '',
+    ...(index !== undefined ? { physicalIndex: index } : {}),
+    dynamic: parseRouterOsBoolean(reply.dynamic),
+    invalid: parseRouterOsBoolean(reply.invalid),
+    chain: reply.chain ?? '',
+    action: reply.action ?? '',
+    ...(comment !== undefined ? { comment } : {}),
+    ownership: RawRuleComment.parseOwnership(comment),
+    disabled: parseRouterOsBoolean(reply.disabled),
+    ...(reply.protocol !== undefined ? { protocol: reply.protocol } : {}),
+    ...(reply['src-address'] !== undefined ? { srcAddress: reply['src-address'] } : {}),
+    ...(reply['dst-address'] !== undefined ? { dstAddress: reply['dst-address'] } : {}),
+    ...(reply['src-port'] !== undefined ? { srcPort: reply['src-port'] } : {}),
+    ...(reply['dst-port'] !== undefined ? { dstPort: reply['dst-port'] } : {}),
+    ...(reply['in-interface'] !== undefined ? { inInterface: reply['in-interface'] } : {}),
+    ...(reply['out-interface'] !== undefined ? { outInterface: reply['out-interface'] } : {}),
+    ...(reply['src-address-list'] !== undefined ? { srcAddressList: reply['src-address-list'] } : {}),
+    ...(reply['dst-address-list'] !== undefined ? { dstAddressList: reply['dst-address-list'] } : {}),
+    ...(reply['tcp-flags'] !== undefined ? { tcpFlags: reply['tcp-flags'] } : {}),
+    ...(reply['packet-mark'] !== undefined ? { packetMark: reply['packet-mark'] } : {}),
+    // `log` desaparece de la respuesta cuando es falso, asi que se conserva la distincion
+    // entre "el router no lo trajo" y "el router dijo false".
+    ...(reply.log !== undefined ? { log: parseRouterOsBoolean(reply.log) } : {}),
+    ...(reply['log-prefix'] !== undefined ? { logPrefix: reply['log-prefix'] } : {}),
+    ...(reply['jump-target'] !== undefined ? { jumpTarget: reply['jump-target'] } : {}),
+    ...(reply['address-list'] !== undefined ? { addressList: reply['address-list'] } : {}),
+    ...(reply['address-list-timeout'] !== undefined ? { addressListTimeout: reply['address-list-timeout'] } : {}),
     bytes: reply.bytes ? parseInt(reply.bytes, 10) || 0 : 0,
     packets: reply.packets ? parseInt(reply.packets, 10) || 0 : 0,
   };

@@ -786,6 +786,22 @@ export interface RouterOsClientPort {
   moveMangleRule(locator: RouterOsMangleRuleLocator, target: RouterOsMangleRuleMoveTarget): Promise<void>;
   removeMangleRule(locator: RouterOsMangleRuleLocator): Promise<void>;
   updateMangleRule(locator: RouterOsMangleRuleLocator, data: RouterOsMangleRuleUpdateData): Promise<void>;
+
+  createRawRule(rule: RouterOsRawRuleCreateData): Promise<void>;
+  disableRawRule(locator: RouterOsRawRuleLocator): Promise<void>;
+  enableRawRule(locator: RouterOsRawRuleLocator): Promise<void>;
+  findRawRuleById(id: string): Promise<ObservedRawRule | null>;
+  /**
+   * Todas las reglas que llevan la referencia administrada. El marcador del comentario no
+   * garantiza unicidad, asi que quien necesite operar debe exigir exactamente una
+   * coincidencia en vez de tomar la primera.
+   */
+  findRawRulesByReference(ruleReference: string): Promise<ObservedRawRule[]>;
+  /** Listado global y fisicamente ordenado de todas las reglas Raw, usado para resolver posiciones y destinos de move. */
+  listRawRules(): Promise<ObservedRawRule[]>;
+  moveRawRule(locator: RouterOsRawRuleLocator, target: RouterOsRawRuleMoveTarget): Promise<void>;
+  removeRawRule(locator: RouterOsRawRuleLocator): Promise<void>;
+  updateRawRule(locator: RouterOsRawRuleLocator, data: RouterOsRawRuleUpdateData): Promise<void>;
 }
 
 export interface RouterOsClientFactoryPort {

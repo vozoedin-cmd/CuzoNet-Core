@@ -35,10 +35,16 @@ import type {
   RouterOsMangleRuleLocator,
   RouterOsMangleRuleMoveTarget,
   RouterOsMangleRuleUpdateData,
+  ObservedRawRule,
+  RouterOsRawRuleCreateData,
+  RouterOsRawRuleLocator,
+  RouterOsRawRuleMoveTarget,
+  RouterOsRawRuleUpdateData,
 } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { ROUTEROS_HOTSPOT_USER_PROFILE_DEFAULTS, ROUTEROS_MANGLE_RULE_DEFAULTS } from '../../../application/ports/provisioning/routeros/routeros-client.port.js';
 import { FilterRuleComment } from '../../../domain/provisioning/routeros/value-objects/filter-rule-comment.js';
 import { MangleRuleComment } from '../../../domain/provisioning/routeros/value-objects/mangle-rule-comment.js';
+import { RawRuleComment } from '../../../domain/provisioning/routeros/value-objects/raw-rule-comment.js';
 import { NatRuleComment } from '../../../domain/provisioning/routeros/value-objects/nat-rule-comment.js';
 
 export interface FakeRouterOsFilterRule {
@@ -120,6 +126,44 @@ export interface FakeRouterOsMangleRule {
   readonly packets: number;
 }
 
+/**
+ * Regla Raw del doble. Espeja `ObservedRawRule` salvo por `ruleReference`, que el doble
+ * guarda resuelta para no reparsear el comentario en cada busqueda.
+ *
+ * `log` es OPCIONAL a proposito, no un booleano con default: la sonda de la Fase 0-bis
+ * comprobo que el router omite el campo cuando es falso, incluso pidiendolo por `.proplist`.
+ * Materializarlo aqui haria al doble mas rico que el cliente real y ocultaria divergencias,
+ * que es exactamente el defecto que `passthrough` causo en Mangle.
+ */
+export interface FakeRouterOsRawRule {
+  readonly action: string;
+  readonly addressList?: string;
+  readonly addressListTimeout?: string;
+  readonly bytes: number;
+  readonly chain: string;
+  readonly comment?: string;
+  readonly disabled: boolean;
+  readonly dstAddress?: string;
+  readonly dstAddressList?: string;
+  readonly dstPort?: string;
+  readonly dynamic: boolean;
+  readonly id: string;
+  readonly inInterface?: string;
+  readonly invalid: boolean;
+  readonly jumpTarget?: string;
+  readonly log?: boolean;
+  readonly logPrefix?: string;
+  readonly outInterface?: string;
+  readonly packetMark?: string;
+  readonly packets: number;
+  readonly protocol?: string;
+  readonly ruleReference?: string;
+  readonly srcAddress?: string;
+  readonly srcAddressList?: string;
+  readonly srcPort?: string;
+  readonly tcpFlags?: string;
+}
+
 export class FakeRouterOsClient implements RouterOsClientPort {
   public closed = false;
   public queues: RouterOsSimpleQueue[] = [];
@@ -130,6 +174,7 @@ export class FakeRouterOsClient implements RouterOsClientPort {
   public filterRules: FakeRouterOsFilterRule[] = [];
   public natRules: FakeRouterOsNatRule[] = [];
   public mangleRules: FakeRouterOsMangleRule[] = [];
+  public rawRules: FakeRouterOsRawRule[] = [];
   private nextId = 1;
 
   public async close(): Promise<void> {
@@ -1235,6 +1280,199 @@ export class FakeRouterOsClient implements RouterOsClientPort {
       ...(data.newRoutingMark !== undefined ? { newRoutingMark: data.newRoutingMark } : {}),
     };
     this.mangleRules[index] = ruleData;
+  }
+
+  public async createRawRule(rule: RouterOsRawRuleCreateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const ruleData: FakeRouterOsRawRule = {
+      action: rule.action,
+      bytes: 0,
+      chain: rule.chain,
+      comment: rule.comment,
+      disabled: rule.disabled ?? false,
+      dynamic: false,
+      id: `*${this.nextId++}`,
+      invalid: false,
+      packets: 0,
+      ...(rule.protocol !== undefined ? { protocol: rule.protocol } : {}),
+      ...(rule.srcAddress !== undefined ? { srcAddress: rule.srcAddress } : {}),
+      ...(rule.dstAddress !== undefined ? { dstAddress: rule.dstAddress } : {}),
+      ...(rule.srcPort !== undefined ? { srcPort: rule.srcPort } : {}),
+      ...(rule.dstPort !== undefined ? { dstPort: rule.dstPort } : {}),
+      ...(rule.inInterface !== undefined ? { inInterface: rule.inInterface } : {}),
+      ...(rule.outInterface !== undefined ? { outInterface: rule.outInterface } : {}),
+      ...(rule.srcAddressList !== undefined ? { srcAddressList: rule.srcAddressList } : {}),
+      ...(rule.dstAddressList !== undefined ? { dstAddressList: rule.dstAddressList } : {}),
+      ...(rule.tcpFlags !== undefined ? { tcpFlags: rule.tcpFlags } : {}),
+      ...(rule.packetMark !== undefined ? { packetMark: rule.packetMark } : {}),
+      // Espeja al router: `log` solo existe si el llamador lo decide.
+      ...(rule.log !== undefined ? { log: rule.log } : {}),
+      ...(rule.logPrefix !== undefined ? { logPrefix: rule.logPrefix } : {}),
+      ...(rule.jumpTarget !== undefined ? { jumpTarget: rule.jumpTarget } : {}),
+      ...(rule.addressList !== undefined ? { addressList: rule.addressList } : {}),
+      ...(rule.addressListTimeout !== undefined ? { addressListTimeout: rule.addressListTimeout } : {}),
+      ...(RawRuleComment.extractReference(rule.comment) !== null
+        ? { ruleReference: RawRuleComment.extractReference(rule.comment)! }
+        : {}),
+    };
+    this.insertRuleAt(this.rawRules, ruleData, rule.placeBeforeId);
+  }
+
+  public async disableRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeRawRule(locator);
+    if (!rule) {
+      return;
+    }
+    const index = this.rawRules.findIndex((r) => r.id === rule.id);
+    this.rawRules[index] = { ...rule, disabled: true };
+  }
+
+  public async enableRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeRawRule(locator);
+    if (!rule) {
+      return;
+    }
+    const index = this.rawRules.findIndex((r) => r.id === rule.id);
+    this.rawRules[index] = { ...rule, disabled: false };
+  }
+
+  public async findRawRuleById(id: string): Promise<ObservedRawRule | null> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = this.rawRules.find((r) => r.id === id);
+    // Espeja al cliente real: una busqueda por `.id` no expone `physicalIndex`.
+    return rule ? this.mapFakeToObservedRawRule(rule) : null;
+  }
+
+  public async findRawRulesByReference(ruleReference: string): Promise<ObservedRawRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const matches: ObservedRawRule[] = [];
+    this.rawRules.forEach((r, index) => {
+      if (r.ruleReference === ruleReference) {
+        matches.push(this.mapFakeToObservedRawRule(r, index));
+      }
+    });
+    return matches;
+  }
+
+  private async resolveFakeRawRule(locator: RouterOsRawRuleLocator): Promise<FakeRouterOsRawRule | null> {
+    if (locator.kind === 'id') {
+      return this.rawRules.find((r) => r.id === locator.id) ?? null;
+    }
+    return this.rawRules.find((r) => r.ruleReference === locator.ruleReference) ?? null;
+  }
+
+  private mapFakeToObservedRawRule(r: FakeRouterOsRawRule, index?: number): ObservedRawRule {
+    return {
+      id: r.id,
+      ...(index !== undefined ? { physicalIndex: index } : {}),
+      dynamic: r.dynamic,
+      invalid: r.invalid,
+      chain: r.chain,
+      action: r.action,
+      ...(r.comment !== undefined ? { comment: r.comment } : {}),
+      ownership: RawRuleComment.parseOwnership(r.comment),
+      disabled: r.disabled,
+      ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
+      ...(r.srcAddress !== undefined ? { srcAddress: r.srcAddress } : {}),
+      ...(r.dstAddress !== undefined ? { dstAddress: r.dstAddress } : {}),
+      ...(r.srcPort !== undefined ? { srcPort: r.srcPort } : {}),
+      ...(r.dstPort !== undefined ? { dstPort: r.dstPort } : {}),
+      ...(r.inInterface !== undefined ? { inInterface: r.inInterface } : {}),
+      ...(r.outInterface !== undefined ? { outInterface: r.outInterface } : {}),
+      ...(r.srcAddressList !== undefined ? { srcAddressList: r.srcAddressList } : {}),
+      ...(r.dstAddressList !== undefined ? { dstAddressList: r.dstAddressList } : {}),
+      ...(r.tcpFlags !== undefined ? { tcpFlags: r.tcpFlags } : {}),
+      ...(r.packetMark !== undefined ? { packetMark: r.packetMark } : {}),
+      ...(r.log !== undefined ? { log: r.log } : {}),
+      ...(r.logPrefix !== undefined ? { logPrefix: r.logPrefix } : {}),
+      ...(r.jumpTarget !== undefined ? { jumpTarget: r.jumpTarget } : {}),
+      ...(r.addressList !== undefined ? { addressList: r.addressList } : {}),
+      ...(r.addressListTimeout !== undefined ? { addressListTimeout: r.addressListTimeout } : {}),
+      bytes: r.bytes,
+      packets: r.packets,
+    };
+  }
+
+  public async listRawRules(): Promise<ObservedRawRule[]> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    return this.rawRules.map((r, i) => this.mapFakeToObservedRawRule(r, i));
+  }
+
+  public async moveRawRule(locator: RouterOsRawRuleLocator, target: RouterOsRawRuleMoveTarget): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeRawRule(locator);
+    if (!rule) {
+      return;
+    }
+    this.rawRules = this.rawRules.filter((r) => r.id !== rule.id);
+    this.insertRuleAt(this.rawRules, rule, target.placeBeforeId);
+  }
+
+  public async removeRawRule(locator: RouterOsRawRuleLocator): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeRawRule(locator);
+    if (!rule) {
+      return;
+    }
+    this.rawRules = this.rawRules.filter((r) => r.id !== rule.id);
+  }
+
+  public async updateRawRule(locator: RouterOsRawRuleLocator, data: RouterOsRawRuleUpdateData): Promise<void> {
+    if (this.closed) {
+      throw new Error('Client is closed');
+    }
+    const rule = await this.resolveFakeRawRule(locator);
+    if (!rule) {
+      return;
+    }
+    const index = this.rawRules.findIndex((r) => r.id === rule.id);
+    const ruleData: FakeRouterOsRawRule = {
+      ...rule,
+      ...(data.action !== undefined ? { action: data.action } : {}),
+      ...(data.chain !== undefined ? { chain: data.chain } : {}),
+      ...(data.comment !== undefined ? { comment: data.comment } : {}),
+      ...(data.disabled !== undefined ? { disabled: data.disabled } : {}),
+      ...(data.protocol !== undefined ? { protocol: data.protocol } : {}),
+      ...(data.srcAddress !== undefined ? { srcAddress: data.srcAddress } : {}),
+      ...(data.dstAddress !== undefined ? { dstAddress: data.dstAddress } : {}),
+      ...(data.srcPort !== undefined ? { srcPort: data.srcPort } : {}),
+      ...(data.dstPort !== undefined ? { dstPort: data.dstPort } : {}),
+      ...(data.inInterface !== undefined ? { inInterface: data.inInterface } : {}),
+      ...(data.outInterface !== undefined ? { outInterface: data.outInterface } : {}),
+      ...(data.srcAddressList !== undefined ? { srcAddressList: data.srcAddressList } : {}),
+      ...(data.dstAddressList !== undefined ? { dstAddressList: data.dstAddressList } : {}),
+      ...(data.tcpFlags !== undefined ? { tcpFlags: data.tcpFlags } : {}),
+      ...(data.packetMark !== undefined ? { packetMark: data.packetMark } : {}),
+      ...(data.log !== undefined ? { log: data.log } : {}),
+      ...(data.logPrefix !== undefined ? { logPrefix: data.logPrefix } : {}),
+      ...(data.jumpTarget !== undefined ? { jumpTarget: data.jumpTarget } : {}),
+      ...(data.addressList !== undefined ? { addressList: data.addressList } : {}),
+      ...(data.addressListTimeout !== undefined ? { addressListTimeout: data.addressListTimeout } : {}),
+      ...(data.comment !== undefined
+        ? RawRuleComment.extractReference(data.comment) !== null
+          ? { ruleReference: RawRuleComment.extractReference(data.comment)! }
+          : {}
+        : {}),
+    };
+    this.rawRules[index] = ruleData;
   }
 
   private insertRuleAt<T extends { id: string }>(rules: T[], rule: T, placeBeforeId: string | undefined): void {
