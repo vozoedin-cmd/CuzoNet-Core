@@ -217,6 +217,36 @@ describe('RouterOsRawProvisioningAdapter', () => {
     );
 
     /**
+     * Direccion inversa, encontrada por la certificacion E2E de la Fase 6: el router descarta
+     * `jump-target` en silencio si la accion no es `jump`. Antes la regla se creaba y solo la
+     * postcondicion detectaba la divergencia, ya con la regla puesta en el router; ahora se
+     * rechaza en la frontera y no se envia comando alguno.
+     */
+    it.each([['accept'], ['drop']])('rejects add with action=%s carrying a jumpTarget', async (action) => {
+      const createSpy = vi.spyOn(fakeClient, 'createRawRule');
+
+      const result = await adapterFor('routeros.firewall.raw.add').execute(
+        input('routeros.firewall.raw.add', { ...ADD, action, jumpTarget: 'mi-chain' }),
+      );
+
+      expect(result.outcome).to.equal('permanentFailure');
+      if (result.outcome === 'permanentFailure') {
+        expect(result.errorCode).to.equal('ROUTEROS_VALIDATION_ERROR');
+      }
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(fakeClient.rawRules).to.have.length(0);
+    });
+
+    it('accepts add with action=jump and its jumpTarget', async () => {
+      const result = await adapterFor('routeros.firewall.raw.add').execute(
+        input('routeros.firewall.raw.add', { ...ADD, action: 'jump', jumpTarget: 'mi-chain' }),
+      );
+
+      expect(result.outcome).to.equal('success');
+      expect(fakeClient.rawRules[0]).to.include({ action: 'jump', jumpTarget: 'mi-chain' });
+    });
+
+    /**
      * La comprobacion que el esquema NO puede hacer: el patch cambia solo la accion y el
      * acompanante tendria que venir de la regla que ya esta en el router.
      */

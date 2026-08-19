@@ -226,6 +226,37 @@ function checkActionCompanion(
   }
 }
 
+/**
+ * Direccion INVERSA de la coherencia, y solo para `jumpTarget`: `jump` es la unica accion que
+ * lo usa, asi que declararlo con cualquier otra es una contradiccion.
+ *
+ * Encontrado por la certificacion E2E de la Fase 6 contra RouterOS 7.21.4: al crear una regla
+ * `action=accept` con `jumpTarget`, el ROUTER DESCARTA EL CAMPO EN SILENCIO. La regla se
+ * creaba sin el, y lo unico que salvaba la situacion era la postcondicion del adapter, que
+ * detectaba la divergencia y devolvia `ROUTEROS_RAW_RULE_POSTCONDITION_FAILED` — un fallo
+ * honesto, pero tardio y con la regla ya creada en el router. Rechazarlo en la frontera
+ * convierte ese fallo de postcondicion en una validacion clara y sin efectos.
+ *
+ * Solo aplica cuando la carga util declara AMBOS: asi un patch que solo cambia la accion
+ * puede seguir apoyandose en el `jumpTarget` que la regla ya tiene en el router, que es la
+ * conducta de `update` certificada en la Fase 6.
+ *
+ * `addressList` NO lleva la prohibicion inversa: la comparten dos acciones y no se ha
+ * observado que el router lo descarte, asi que anadirla seria inventar una regla.
+ */
+function checkJumpTargetProhibition(
+  value: { action?: string | undefined; jumpTarget?: string | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.jumpTarget !== undefined && value.action !== undefined && value.action !== 'jump') {
+    ctx.addIssue({
+      code: 'custom',
+      message: `"jumpTarget" solo es válido con action="jump"; con "${value.action}" el router lo descarta en silencio.`,
+      path: ['jumpTarget'],
+    });
+  }
+}
+
 export const routerOsRawRuleAddSchema = baseRouterOsRawRuleSchema
   .extend({
     ...rawMatchFields,
@@ -242,6 +273,7 @@ export const routerOsRawRuleAddSchema = baseRouterOsRawRuleSchema
     checkPortProtocol(value, ctx);
     checkTcpFlagsProtocol(value, ctx);
     checkActionCompanion(value, ctx);
+    checkJumpTargetProhibition(value, ctx);
   });
 export type RouterOsRawRuleAddInput = z.infer<typeof routerOsRawRuleAddSchema>;
 
@@ -265,6 +297,10 @@ export const routerOsRawRuleUpdateSchema = baseRouterOsRawRuleSchema
   .superRefine((value, ctx) => {
     checkPortProtocol(value, ctx);
     checkTcpFlagsProtocol(value, ctx);
+    // Solo dispara cuando el propio patch declara accion y jumpTarget a la vez, que es una
+    // contradiccion visible sin consultar el router. Un patch que declara solo uno de los dos
+    // sigue resolviendose contra el estado observado en el adapter.
+    checkJumpTargetProhibition(value, ctx);
   });
 export type RouterOsRawRuleUpdateInput = z.infer<typeof routerOsRawRuleUpdateSchema>;
 

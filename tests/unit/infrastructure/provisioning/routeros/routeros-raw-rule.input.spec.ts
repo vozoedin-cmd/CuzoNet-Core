@@ -201,6 +201,47 @@ describe('routerOsRawRuleInputSchema', () => {
       expect(ok(add({ action: 'jump', jumpTarget: 'mi-chain' }))).to.equal(true);
     });
 
+    /**
+     * Direccion INVERSA, encontrada por la certificacion E2E de la Fase 6: el router DESCARTA
+     * `jump-target` en silencio cuando la accion no es `jump`. Antes la regla se creaba sin el
+     * campo y solo la postcondicion del adapter detectaba la divergencia, ya con la regla
+     * puesta en el router. Ahora se rechaza en la frontera, sin efectos.
+     */
+    describe('jumpTarget is only valid with action=jump', () => {
+      it.each([
+        ['accept'],
+        ['drop'],
+        ['log'],
+        ['passthrough'],
+        ['return'],
+        ['add-src-to-address-list'],
+        ['add-dst-to-address-list'],
+      ])('rejects jumpTarget with action=%s', (action) => {
+        const extra = action.startsWith('add-') ? { addressList: 'lista' } : {};
+        expect(ok(add({ action, jumpTarget: 'mi-chain', ...extra }))).to.equal(false);
+      });
+
+      it('keeps accepting those actions when jumpTarget is absent', () => {
+        for (const action of ['accept', 'drop', 'log', 'passthrough', 'return']) {
+          expect(ok(add({ action })), action).to.equal(true);
+        }
+      });
+
+      it('names jumpTarget as the offending field', () => {
+        const result = parse(add({ action: 'accept', jumpTarget: 'mi-chain' }));
+
+        expect(result.success).to.equal(false);
+        if (!result.success) {
+          expect(result.error.issues.some((issue) => issue.path.includes('jumpTarget'))).to.equal(true);
+        }
+      });
+    });
+
+    /** `addressList` NO lleva prohibicion inversa: no se observo que el router lo descarte. */
+    it('still accepts addressList on an action that does not consume it', () => {
+      expect(ok(add({ action: 'accept', addressList: 'lista' }))).to.equal(true);
+    });
+
     it.each([['add-src-to-address-list'], ['add-dst-to-address-list']])('rejects %s without addressList', (action) => {
       expect(ok(add({ action }))).to.equal(false);
     });
@@ -226,6 +267,32 @@ describe('routerOsRawRuleInputSchema', () => {
       expect(
         ok({ action: 'jump', actionType: 'routeros.firewall.raw.update', routerId: 'r', ruleReference: 'ref' }),
       ).to.equal(true);
+    });
+
+    describe('update and the jumpTarget prohibition', () => {
+      const update = (payload: Record<string, unknown>) =>
+        ok({ actionType: 'routeros.firewall.raw.update', routerId: 'r', ruleReference: 'ref', ...payload });
+
+      /** Contradiccion visible sin consultar el router: ambos campos en el mismo patch. */
+      it.each([['accept'], ['drop']])('rejects a patch declaring action=%s together with jumpTarget', (action) => {
+        expect(update({ action, jumpTarget: 'mi-chain' })).to.equal(false);
+      });
+
+      it('accepts a patch declaring action=jump together with jumpTarget', () => {
+        expect(update({ action: 'jump', jumpTarget: 'mi-chain' })).to.equal(true);
+      });
+
+      /**
+       * CONDUCTA PRESERVADA, certificada E2E en la Fase 6: un patch que declara solo uno de
+       * los dos se resuelve contra el estado observado en el adapter, no aqui.
+       */
+      it('accepts a patch that declares only the action, leaning on the observed rule', () => {
+        expect(update({ action: 'accept' })).to.equal(true);
+      });
+
+      it('accepts a patch that declares only jumpTarget, leaning on the observed action', () => {
+        expect(update({ jumpTarget: 'mi-chain' })).to.equal(true);
+      });
     });
   });
 
